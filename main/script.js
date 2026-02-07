@@ -415,6 +415,13 @@ let carouselState = {
   upcoming: { currentPage: 0, maxPage: 50, shownMovies: [] },
   highestRated: { currentPage: 0, maxPage: 50, shownMovies: [] },
   classics: { currentPage: 0, maxPage: 50, shownMovies: [] },
+  action: { currentPage: 0, maxPage: 80, shownMovies: [] },
+  comedy: { currentPage: 0, maxPage: 80, shownMovies: [] },
+  horror: { currentPage: 0, maxPage: 80, shownMovies: [] },
+  scifi: { currentPage: 0, maxPage: 80, shownMovies: [] },
+  drama: { currentPage: 0, maxPage: 80, shownMovies: [] },
+  documentary: { currentPage: 0, maxPage: 50, shownMovies: [] },
+  animation: { currentPage: 0, maxPage: 80, shownMovies: [] },
   genre: { currentPage: 0, maxPage: 50, shownMovies: [] }
 };
 
@@ -913,15 +920,30 @@ async function loadMoviesForCarousels() {
       return pages.flatMap(p => p.results || []);
     }
     
-    // Korak 1: Učitaj SVE karusele PARALELNO — samo 3 stranice po karuselu (dovoljno za 60 filmova)
-    const [topRatedMovies, trendingMovies, newReleases, popularMovies, upcomingMovies, highestRated, classics] = await Promise.all([
+    // Korak 1: Učitaj SVE karusele PARALELNO — 3-5 stranica po karuselu
+    const [topRatedMovies, trendingMovies, newReleases, popularMovies, upcomingMovies, highestRated, classics,
+           actionMovies, comedyMovies, horrorMovies, scifiMovies, dramaMovies, documentaries, animatedMovies] = await Promise.all([
       fetchPages(`${TMDB_BASE_URL}/movie/top_rated?api_key=${TMDB_API_KEY}&language=en-US`, 3),
       fetchPages(`${TMDB_BASE_URL}/trending/movie/week?api_key=${TMDB_API_KEY}&language=en-US`, 3),
       fetchPages(`${TMDB_BASE_URL}/movie/now_playing?api_key=${TMDB_API_KEY}&language=en-US`, 3),
-      fetchPages(`${TMDB_BASE_URL}/movie/popular?api_key=${TMDB_API_KEY}&language=en-US`, 3),
+      fetchPages(`${TMDB_BASE_URL}/movie/popular?api_key=${TMDB_API_KEY}&language=en-US`, 5),
       fetchPages(`${TMDB_BASE_URL}/movie/upcoming?api_key=${TMDB_API_KEY}&language=en-US`, 3),
       fetchPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&sort_by=vote_average.desc&vote_count.gte=1000&language=en-US`, 3),
-      fetchPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=1950-01-01&primary_release_date.lte=1999-12-31&sort_by=vote_average.desc&vote_count.gte=500&language=en-US`, 3)
+      fetchPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&primary_release_date.gte=1950-01-01&primary_release_date.lte=1999-12-31&sort_by=vote_average.desc&vote_count.gte=500&language=en-US`, 3),
+      // Action & Adventure (28=Action, 12=Adventure)
+      fetchPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=28,12&sort_by=popularity.desc&vote_count.gte=500&language=en-US`, 4),
+      // Comedy (35=Comedy)
+      fetchPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=35&sort_by=popularity.desc&vote_count.gte=300&language=en-US`, 4),
+      // Horror & Thriller (27=Horror, 53=Thriller)
+      fetchPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=27,53&sort_by=popularity.desc&vote_count.gte=300&language=en-US`, 4),
+      // Sci-Fi & Fantasy (878=Science Fiction, 14=Fantasy)
+      fetchPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=878,14&sort_by=popularity.desc&vote_count.gte=400&language=en-US`, 4),
+      // Drama & Romance (18=Drama, 10749=Romance)
+      fetchPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=18,10749&sort_by=popularity.desc&vote_count.gte=300&language=en-US`, 4),
+      // Documentaries (99=Documentary)
+      fetchPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=99&sort_by=vote_average.desc&vote_count.gte=100&language=en-US`, 3),
+      // Animation (16=Animation)
+      fetchPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=16&sort_by=popularity.desc&vote_count.gte=300&language=en-US`, 4)
     ]);
     
     console.log(`✅ Loaded all carousels in parallel`);
@@ -931,8 +953,9 @@ async function loadMoviesForCarousels() {
     
     // Korak 2: Renderuj sve karusele
     const carouselSections = document.querySelectorAll('.carousel-section .carousel');
-    const movieSets = [topRatedMovies, trendingMovies, topRatedMovies, newReleases, popularMovies, upcomingMovies, highestRated, classics];
-    const isTrendingFlags = [false, true, false, false, false, false, false, false];
+    const movieSets = [topRatedMovies, trendingMovies, topRatedMovies, newReleases, popularMovies, upcomingMovies, highestRated, classics,
+                       actionMovies, comedyMovies, horrorMovies, scifiMovies, dramaMovies, documentaries, animatedMovies];
+    const isTrendingFlags = [false, true, false, false, false, false, false, false, false, false, false, false, false, false, false];
     
     carouselSections.forEach((carousel, i) => {
       if (movieSets[i] && movieSets[i].length > 0) {
@@ -1225,6 +1248,90 @@ async function refreshCarousel(carouselType) {
             renderMovieCards(carousel, retryData.results);
           }
         }
+        break;
+        
+      case 'action':
+        carousel = document.querySelector('.carousel-section:nth-of-type(9) .carousel');
+        carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
+        
+        state.currentPage = (state.currentPage % state.maxPage) + 1;
+        const actionResponse = await fetch(
+          `${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=28,12&sort_by=popularity.desc&vote_count.gte=500&language=en-US&page=${state.currentPage}`
+        );
+        const actionData = await actionResponse.json();
+        if (actionData.results) renderMovieCards(carousel, actionData.results);
+        break;
+        
+      case 'comedy':
+        carousel = document.querySelector('.carousel-section:nth-of-type(10) .carousel');
+        carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
+        
+        state.currentPage = (state.currentPage % state.maxPage) + 1;
+        const comedyResponse = await fetch(
+          `${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=35&sort_by=popularity.desc&vote_count.gte=300&language=en-US&page=${state.currentPage}`
+        );
+        const comedyData = await comedyResponse.json();
+        if (comedyData.results) renderMovieCards(carousel, comedyData.results);
+        break;
+        
+      case 'horror':
+        carousel = document.querySelector('.carousel-section:nth-of-type(11) .carousel');
+        carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
+        
+        state.currentPage = (state.currentPage % state.maxPage) + 1;
+        const horrorResponse = await fetch(
+          `${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=27,53&sort_by=popularity.desc&vote_count.gte=300&language=en-US&page=${state.currentPage}`
+        );
+        const horrorData = await horrorResponse.json();
+        if (horrorData.results) renderMovieCards(carousel, horrorData.results);
+        break;
+        
+      case 'scifi':
+        carousel = document.querySelector('.carousel-section:nth-of-type(12) .carousel');
+        carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
+        
+        state.currentPage = (state.currentPage % state.maxPage) + 1;
+        const scifiResponse = await fetch(
+          `${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=878,14&sort_by=popularity.desc&vote_count.gte=400&language=en-US&page=${state.currentPage}`
+        );
+        const scifiData = await scifiResponse.json();
+        if (scifiData.results) renderMovieCards(carousel, scifiData.results);
+        break;
+        
+      case 'drama':
+        carousel = document.querySelector('.carousel-section:nth-of-type(13) .carousel');
+        carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
+        
+        state.currentPage = (state.currentPage % state.maxPage) + 1;
+        const dramaResponse = await fetch(
+          `${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=18,10749&sort_by=popularity.desc&vote_count.gte=300&language=en-US&page=${state.currentPage}`
+        );
+        const dramaData = await dramaResponse.json();
+        if (dramaData.results) renderMovieCards(carousel, dramaData.results);
+        break;
+        
+      case 'documentary':
+        carousel = document.querySelector('.carousel-section:nth-of-type(14) .carousel');
+        carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
+        
+        state.currentPage = (state.currentPage % state.maxPage) + 1;
+        const docResponse = await fetch(
+          `${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=99&sort_by=vote_average.desc&vote_count.gte=100&language=en-US&page=${state.currentPage}`
+        );
+        const docData = await docResponse.json();
+        if (docData.results) renderMovieCards(carousel, docData.results);
+        break;
+        
+      case 'animation':
+        carousel = document.querySelector('.carousel-section:nth-of-type(15) .carousel');
+        carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
+        
+        state.currentPage = (state.currentPage % state.maxPage) + 1;
+        const animResponse = await fetch(
+          `${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=16&sort_by=popularity.desc&vote_count.gte=300&language=en-US&page=${state.currentPage}`
+        );
+        const animData = await animResponse.json();
+        if (animData.results) renderMovieCards(carousel, animData.results);
         break;
     }
     

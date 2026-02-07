@@ -1,0 +1,4 @@
+node_modules/
+moviehub.db
+moviehub.db-wal
+moviehub.db-shm

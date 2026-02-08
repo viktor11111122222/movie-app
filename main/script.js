@@ -397,6 +397,34 @@ function getVideoQualityParam() {
 // Wishlist
 let wishlist = JSON.parse(localStorage.getItem('movieWishlist')) || [];
 
+// User movie status caches (rating & watched)
+let userRatings = {};   // movieId -> rating (0.5-10)
+let userWatched = {};   // movieId -> true/false
+let userDataLoaded = false;
+
+// Load user ratings & watched from server
+async function loadUserMovieData() {
+  if (!authToken || userDataLoaded) return;
+  try {
+    const [ratingsRes, watchedRes] = await Promise.all([
+      apiCall('/api/ratings'),
+      apiCall('/api/watched')
+    ]);
+    if (ratingsRes.ok) {
+      const ratings = await ratingsRes.json();
+      ratings.forEach(r => { userRatings[r.movie_id] = r.rating; });
+    }
+    if (watchedRes.ok) {
+      const watched = await watchedRes.json();
+      watched.forEach(id => { userWatched[id] = true; });
+    }
+    userDataLoaded = true;
+    console.log('✅ Loaded user ratings:', Object.keys(userRatings).length, 'and watched:', Object.keys(userWatched).length);
+  } catch (e) {
+    console.error('Failed to load user movie data:', e);
+  }
+}
+
 // Search debounce timer
 let searchTimeout;
 
@@ -404,6 +432,231 @@ let searchTimeout;
 let allGenres = {};
 let allTopRatedMovies = [];
 let currentGenreFilter = null;
+let activeStreamingFilter = 'all';
+
+// ==================== STREAMING PROVIDERS ====================
+const STREAMING_PROVIDERS = {
+  8:    { name: 'Netflix',      color: '#E50914', logo: '/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg' },
+  1899: { name: 'Max',          color: '#002BE7', logo: '/fksCUZ9QDWZMUwL2LgMtLckROUN.jpg' },
+  337:  { name: 'Disney+',      color: '#113CCF', logo: '/97yvRBw1GzX7fXprcF80er19ot.jpg' },
+  350:  { name: 'Apple TV+',    color: '#000000', logo: '/6uhKBfmtzFqOcLousHwZuzcrScK.jpg' },
+  9:    { name: 'Prime Video',  color: '#00A8E1', logo: '/emthp39XA2YScoYL1p0sdbAH2WA.jpg' },
+  15:   { name: 'Hulu',         color: '#1CE783', logo: '/zxrQdKQoTjMBY4QPOHISaq3R4Uo.jpg' },
+  531:  { name: 'Paramount+',   color: '#0064FF', logo: '/xbhHHa1YgtpwhC8lb1NQ3ACVcLd.jpg' },
+  386:  { name: 'Peacock',      color: '#000000', logo: '/xTHltMrZPAJFLQ6qyCBjAnXSmZt.jpg' }
+};
+const TRACKED_PROVIDER_IDS = Object.keys(STREAMING_PROVIDERS).map(Number);
+const providerCache = new Map(); // movieId -> [providerIds]
+let providerFetchQueue = [];
+let providerFetchActive = 0;
+const PROVIDER_FETCH_CONCURRENCY = 8;
+
+// ==================== USER REGION DETECTION ====================
+let userRegion = null; // Will be auto-detected
+let regionDetectionPromise = null;
+
+async function detectUserRegion() {
+  if (userRegion) return userRegion;
+  if (regionDetectionPromise) return regionDetectionPromise;
+  
+  regionDetectionPromise = (async () => {
+    // Try multiple free geolocation APIs with fallback
+    const geoApis = [
+      { url: 'https://ipapi.co/json/', getCode: data => data.country_code },
+      { url: 'https://ipwho.is/', getCode: data => data.country_code },
+      { url: 'https://freeipapi.com/api/json', getCode: data => data.countryCode },
+    ];
+    
+    for (const api of geoApis) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(api.url, { signal: controller.signal });
+        clearTimeout(timeout);
+        const data = await res.json();
+        const code = api.getCode(data);
+        if (code && code.length === 2) {
+          userRegion = code.toUpperCase();
+          console.log(`🌍 Detected user region: ${userRegion}`);
+          updateRegionDisplay();
+          return userRegion;
+        }
+      } catch (e) {
+        console.warn('Region API failed, trying next...');
+      }
+    }
+    
+    // Fallback: use browser language to guess
+    const lang = navigator.language || navigator.userLanguage || 'en-US';
+    const parts = lang.split('-');
+    if (parts.length > 1 && parts[1].length === 2) {
+      userRegion = parts[1].toUpperCase();
+    } else {
+      // Map common language codes to countries
+      const langMap = { sr: 'RS', hr: 'HR', bs: 'BA', de: 'DE', fr: 'FR', it: 'IT', es: 'ES', en: 'US', pt: 'BR', ja: 'JP', ko: 'KR' };
+      userRegion = langMap[parts[0]] || 'US';
+    }
+    console.log(`🌍 Region fallback from browser language: ${userRegion}`);
+    updateRegionDisplay();
+    return userRegion;
+  })();
+  
+  return regionDetectionPromise;
+}
+
+function updateRegionDisplay() {
+  const label = document.querySelector('.streaming-filter-label span');
+  if (label && userRegion) {
+    label.textContent = `Filter by service (${userRegion}):`;
+  }
+}
+
+function getUserRegion() {
+  return userRegion || 'US';
+}
+
+// Fetch providers for a single movie — ONLY for user's detected region
+async function fetchMovieProviders(movieId) {
+  if (providerCache.has(movieId)) return providerCache.get(movieId);
+  try {
+    await detectUserRegion();
+    const region = getUserRegion();
+    const res = await fetch(`${TMDB_BASE_URL}/movie/${movieId}/watch/providers?api_key=${TMDB_API_KEY}`);
+    const data = await res.json();
+    
+    // ONLY check the user's actual region
+    const regionData = data.results?.[region];
+    let found = [];
+    if (regionData && regionData.flatrate) {
+      found = regionData.flatrate.map(p => p.provider_id).filter(id => TRACKED_PROVIDER_IDS.includes(id));
+    }
+    providerCache.set(movieId, found);
+    return found;
+  } catch (e) {
+    providerCache.set(movieId, []);
+    return [];
+  }
+}
+
+// Process the provider fetch queue with concurrency limit
+function processProviderQueue() {
+  while (providerFetchActive < PROVIDER_FETCH_CONCURRENCY && providerFetchQueue.length > 0) {
+    const task = providerFetchQueue.shift();
+    providerFetchActive++;
+    task().finally(() => {
+      providerFetchActive--;
+      processProviderQueue();
+    });
+  }
+}
+
+// Add streaming badges to a card element
+async function addStreamingBadges(card, movieId) {
+  return new Promise(resolve => {
+    providerFetchQueue.push(async () => {
+      const providerIds = await fetchMovieProviders(movieId);
+      if (providerIds.length > 0 && card.isConnected) {
+        let badgesContainer = card.querySelector('.streaming-badges');
+        if (!badgesContainer) {
+          badgesContainer = document.createElement('div');
+          badgesContainer.className = 'streaming-badges';
+          card.appendChild(badgesContainer);
+        }
+        badgesContainer.innerHTML = '';
+        providerIds.slice(0, 4).forEach(pid => {
+          const prov = STREAMING_PROVIDERS[pid];
+          if (prov) {
+            const badge = document.createElement('div');
+            badge.className = 'streaming-badge';
+            badge.title = prov.name;
+            badge.innerHTML = `<img src="https://image.tmdb.org/t/p/w92${prov.logo}" alt="${prov.name}">`;
+            badgesContainer.appendChild(badge);
+          }
+        });
+      }
+      resolve();
+    });
+    processProviderQueue();
+  });
+}
+
+// Filter carousels by streaming service
+async function filterByStreamingService(providerId) {
+  // Update active button
+  document.querySelectorAll('.streaming-filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.provider === String(providerId));
+  });
+  
+  activeStreamingFilter = providerId;
+  
+  // Clear provider cache when switching filters
+  providerCache.clear();
+  
+  if (providerId === 'all') {
+    // Reset - reload all carousels normally
+    showLoadingOverlay('Loading all movies...');
+    await loadMoviesForCarousels();
+    hideLoadingOverlay();
+    showNotification('🎬 Showing all movies');
+    return;
+  }
+  
+  const provName = STREAMING_PROVIDERS[providerId]?.name || 'service';
+  showLoadingOverlay(`Loading ${provName} movies...`);
+  
+  try {
+    // Use discover API with watch provider filter — use user's actual region
+    await detectUserRegion();
+    const region = getUserRegion();
+    const wpParam = `&with_watch_providers=${providerId}&watch_region=${region}`;
+    
+    async function fetchFilteredPages(url, pageCount) {
+      const promises = Array.from({length: pageCount}, (_, i) =>
+        fetch(`${url}${wpParam}&page=${i + 1}`).then(r => r.json()).catch(() => ({ results: [] }))
+      );
+      const pages = await Promise.all(promises);
+      return pages.flatMap(p => p.results || []);
+    }
+    
+    const [popular, topRated, newReleases, action, comedy, horror, scifi, drama] = await Promise.all([
+      fetchFilteredPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&sort_by=popularity.desc&vote_count.gte=50&language=en-US`, 3),
+      fetchFilteredPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&sort_by=vote_average.desc&vote_count.gte=200&language=en-US`, 3),
+      fetchFilteredPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&sort_by=primary_release_date.desc&vote_count.gte=20&language=en-US`, 2),
+      fetchFilteredPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=28&sort_by=popularity.desc&vote_count.gte=50&language=en-US`, 2),
+      fetchFilteredPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=35&sort_by=popularity.desc&vote_count.gte=50&language=en-US`, 2),
+      fetchFilteredPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=27,53&sort_by=popularity.desc&vote_count.gte=50&language=en-US`, 2),
+      fetchFilteredPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=878,14&sort_by=popularity.desc&vote_count.gte=50&language=en-US`, 2),
+      fetchFilteredPages(`${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&with_genres=18&sort_by=popularity.desc&vote_count.gte=50&language=en-US`, 2)
+    ]);
+    
+    // Pre-cache all these as available on this provider
+    [popular, topRated, newReleases, action, comedy, horror, scifi, drama].flat().forEach(m => {
+      if (!providerCache.has(m.id)) providerCache.set(m.id, [providerId]);
+    });
+    
+    const carousels = document.querySelectorAll('.carousel-section .carousel');
+    // Distribute: popular for first 2, topRated for next 2, newReleases for 1, etc.
+    const sets = [popular, popular.slice(20), topRated, newReleases, popular.slice(10, 30), topRated.slice(20),
+                  topRated.slice(10, 30), popular.slice(30), action, comedy, horror, scifi, drama, topRated.slice(40), popular.slice(40)];
+    
+    carousels.forEach((carousel, i) => {
+      const movies = sets[i] || popular;
+      if (movies.length > 0) {
+        renderMovieCards(carousel, movies.slice(0, 20), i === 1);
+      } else {
+        carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">No movies found on ' + provName + ' in this category</p>';
+      }
+    });
+    
+    hideLoadingOverlay();
+    showNotification(`🎬 Showing ${provName} movies`);
+    
+  } catch (error) {
+    console.error('Error filtering by provider:', error);
+    hideLoadingOverlay();
+    showNotification('❌ Error loading filtered movies');
+  }
+}
 
 // Tracking za svaki carousel
 let carouselState = {
@@ -773,10 +1026,12 @@ window.addEventListener('DOMContentLoaded', async () => {
 // Initialize the main app after auth
 function initializeApp() {
   console.log('🎬 Initializing app for user:', currentUser?.display_name || currentUser?.username);
+  detectUserRegion(); // Start detecting region immediately
   loadGenres();
   loadHeroMovie();
   updateWishlistCount();
   loadMoviesForCarousels();
+  loadUserMovieData(); // Load ratings & watched status
   loadProfile();
   loadSettings();
   translatePage();
@@ -1011,6 +1266,7 @@ function renderMovieCards(container, movies, isTrending = false) {
     card.appendChild(overlay);
     
     card.onclick = () => openMovieModal(movie);
+    card.dataset.movieId = movie.id;
     fragment.appendChild(card);
     
     // Trigger animation
@@ -1018,6 +1274,12 @@ function renderMovieCards(container, movies, isTrending = false) {
   });
   
   container.appendChild(fragment);
+  
+  // Fetch and add streaming badges progressively
+  movies.forEach(movie => {
+    const card = container.querySelector(`[data-movie-id="${movie.id}"]`);
+    if (card) addStreamingBadges(card, movie.id);
+  });
 }
 
 // Refresh carousel sa novim filmovima
@@ -1546,6 +1808,18 @@ async function openMovieModal(movie) {
     };
   }
   
+  // Setup watched button + rating stars
+  currentModalMovie = movie;
+  const watchedBtn = document.getElementById('movieModalWatchedBtn');
+  if (watchedBtn) {
+    // Remove any existing event listeners and add new one
+    watchedBtn.replaceWith(watchedBtn.cloneNode(true));
+    const newWatchedBtn = document.getElementById('movieModalWatchedBtn');
+    newWatchedBtn.addEventListener('click', toggleWatchedFromModal);
+  }
+  setupWatchedButton(movie);
+  setupRatingStars(movie);
+  
   // Učitaj trailer info
   try {
     const videosResponse = await fetch(`${TMDB_BASE_URL}/movie/${movie.id}/videos?api_key=${TMDB_API_KEY}&language=en-US`);
@@ -1570,28 +1844,20 @@ async function openMovieModal(movie) {
   
   // Učitaj streaming providere
   try {
+    await detectUserRegion();
+    const region = getUserRegion();
     const response = await fetch(`${TMDB_BASE_URL}/movie/${movie.id}/watch/providers?api_key=${TMDB_API_KEY}`);
     const data = await response.json();
     
-    console.log('🔍 Provider data for', movie.title, ':', data);
+    console.log('🔍 Provider data for', movie.title, '(region:', region, '):', data);
     
-    // Pokušaj više regiona (US, GB, CA, AU, DE, FR, IT, ES)
-    const regions = ['US', 'GB', 'CA', 'AU', 'DE', 'FR', 'IT', 'ES', 'RS', 'HR', 'BA'];
-    let providersFound = null;
-    let selectedRegion = null;
-    
-    for (const region of regions) {
-      const regionData = data.results?.[region];
-      if (regionData && (regionData.flatrate || regionData.buy || regionData.rent)) {
-        providersFound = regionData;
-        selectedRegion = region;
-        break;
-      }
-    }
+    // SAMO korisnikov region — ne probaj druge regione
+    const providersFound = data.results?.[region] || null;
+    const selectedRegion = region;
     
     const providersContainer = document.getElementById('movieModalProviders');
     
-    if (providersFound) {
+    if (providersFound && (providersFound.flatrate || providersFound.buy || providersFound.rent)) {
       const streamingServices = providersFound.flatrate || [];
       const buyServices = providersFound.buy || [];
       const rentServices = providersFound.rent || [];
@@ -1661,6 +1927,10 @@ function createMovieModal() {
         <button class="movie-modal-close" onclick="closeMovieModal()">✕</button>
         <div class="movie-modal-poster">
           <img id="movieModalPoster" src="" alt="Movie Poster">
+          <div class="watched-badge" id="movieModalWatchedBadge" style="display:none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            Watched
+          </div>
         </div>
         <div class="movie-modal-details">
           <h2 id="movieModalTitle"></h2>
@@ -1675,6 +1945,20 @@ function createMovieModal() {
             <button class="movie-modal-wishlist-btn" id="movieModalWishlistBtn">
               + Add to Watchlist
             </button>
+            <button class="movie-modal-watched-btn" id="movieModalWatchedBtn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              Mark as Watched
+            </button>
+          </div>
+          <div class="movie-modal-user-rating" id="movieModalUserRating">
+            <span class="user-rating-label">Your Rating:</span>
+            <div class="star-rating" id="starRating">
+              <div class="star-rating-stars">
+                ${[1,2,3,4,5,6,7,8,9,10].map(i => `<span class="star" data-value="${i}" onmouseenter="hoverStar(${i})" onmouseleave="resetStarHover()" onclick="rateStar(${i})">★</span>`).join('')}
+              </div>
+              <span class="star-rating-value" id="starRatingValue">—</span>
+              <button class="star-rating-clear" id="starRatingClear" onclick="clearRating()" style="display:none;" title="Remove rating">✕</button>
+            </div>
           </div>
           <p class="movie-modal-overview" id="movieModalOverview"></p>
           <div class="movie-modal-providers">
@@ -1743,6 +2027,155 @@ function toggleWishlistForModal(movie, button) {
 }
 
 // Otvori fullscreen trailer za film iz movie modal-a
+
+// ==================== RATING & WATCHED SYSTEM ====================
+let currentModalMovie = null;
+
+// Setup watched button state
+function setupWatchedButton(movie) {
+  const btn = document.getElementById('movieModalWatchedBtn');
+  const badge = document.getElementById('movieModalWatchedBadge');
+  console.log('🔧 Setting up watched button for:', movie.title, 'Button found:', !!btn);
+  if (!btn) return;
+  
+  const isWatched = userWatched[movie.id] === true;
+  updateWatchedUI(isWatched);
+  
+  // Also fetch from server to be sure
+  if (authToken) {
+    apiCall(`/api/movie-status/${movie.id}`).then(async res => {
+      if (res.ok) {
+        const data = await res.json();
+        userWatched[movie.id] = data.watched;
+        if (data.rating !== null) userRatings[movie.id] = data.rating;
+        updateWatchedUI(data.watched);
+        if (data.rating !== null) updateRatingUI(data.rating);
+      }
+    }).catch(() => {});
+  }
+}
+
+function updateWatchedUI(isWatched) {
+  const btn = document.getElementById('movieModalWatchedBtn');
+  const badge = document.getElementById('movieModalWatchedBadge');
+  console.log('🎯 Updating watched UI:', isWatched, 'Button found:', !!btn);
+  if (!btn) return;
+  
+  if (isWatched) {
+    btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Watched`;
+    btn.classList.add('active');
+    if (badge) badge.style.display = 'flex';
+  } else {
+    btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg> Mark as Watched`;
+    btn.classList.remove('active');
+    if (badge) badge.style.display = 'none';
+  }
+  console.log('✅ Button updated, classes:', btn.className);
+}
+
+async function toggleWatchedFromModal() {
+  console.log('🎬 Toggle watched called, currentModalMovie:', currentModalMovie?.title, 'authToken:', !!authToken);
+  if (!currentModalMovie || !authToken) return;
+  const movieId = currentModalMovie.id;
+  const wasWatched = userWatched[movieId] === true;
+  
+  console.log('📊 Current watched state:', wasWatched, 'toggling to:', !wasWatched);
+  
+  // Optimistic update
+  userWatched[movieId] = !wasWatched;
+  updateWatchedUI(!wasWatched);
+  
+  try {
+    const res = await apiCall('/api/watched/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ movie_id: movieId })
+    });
+    const data = await res.json();
+    userWatched[movieId] = data.watched;
+    updateWatchedUI(data.watched);
+    showNotification(data.watched ? '✅ Marked as watched' : '↩️ Unmarked as watched');
+  } catch (e) {
+    // Revert on error
+    userWatched[movieId] = wasWatched;
+    updateWatchedUI(wasWatched);
+    console.error('Failed to toggle watched:', e);
+  }
+}
+
+// Setup rating stars
+function setupRatingStars(movie) {
+  const existingRating = userRatings[movie.id] || null;
+  updateRatingUI(existingRating);
+}
+
+function updateRatingUI(rating) {
+  const stars = document.querySelectorAll('#starRating .star');
+  const valueEl = document.getElementById('starRatingValue');
+  const clearBtn = document.getElementById('starRatingClear');
+  
+  stars.forEach(star => {
+    const val = parseInt(star.dataset.value);
+    star.classList.toggle('active', rating !== null && val <= rating);
+  });
+  
+  if (valueEl) {
+    valueEl.textContent = rating !== null ? `${rating}/10` : '—';
+  }
+  if (clearBtn) {
+    clearBtn.style.display = rating !== null ? 'inline-flex' : 'none';
+  }
+}
+
+function hoverStar(value) {
+  const stars = document.querySelectorAll('#starRating .star');
+  stars.forEach(star => {
+    const val = parseInt(star.dataset.value);
+    star.classList.toggle('hover', val <= value);
+  });
+}
+
+function resetStarHover() {
+  const stars = document.querySelectorAll('#starRating .star');
+  stars.forEach(star => star.classList.remove('hover'));
+}
+
+async function rateStar(value) {
+  if (!currentModalMovie || !authToken) {
+    showNotification('Log in to rate movies');
+    return;
+  }
+  const movieId = currentModalMovie.id;
+  
+  // Optimistic update
+  userRatings[movieId] = value;
+  updateRatingUI(value);
+  
+  try {
+    await apiCall('/api/rate', {
+      method: 'POST',
+      body: JSON.stringify({ movie_id: movieId, rating: value })
+    });
+    showNotification(`⭐ Rated ${currentModalMovie.title}: ${value}/10`);
+  } catch (e) {
+    console.error('Failed to save rating:', e);
+  }
+}
+
+async function clearRating() {
+  if (!currentModalMovie || !authToken) return;
+  const movieId = currentModalMovie.id;
+  
+  delete userRatings[movieId];
+  updateRatingUI(null);
+  
+  try {
+    await apiCall(`/api/rate/${movieId}`, { method: 'DELETE' });
+    showNotification('Rating removed');
+  } catch (e) {
+    console.error('Failed to clear rating:', e);
+  }
+}
+// ==================== END RATING & WATCHED ====================
 function openFullscreenTrailerForMovie(trailerKey) {
   console.log('🎬 Opening trailer from movie modal');
   

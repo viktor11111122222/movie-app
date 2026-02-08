@@ -247,6 +247,53 @@
 
   <!-- Main Content -->
   <main class="main-content">
+
+    <!-- Streaming Service Filter -->
+    <div class="streaming-filter" id="streamingFilter">
+      <div class="streaming-filter-label">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+        </svg>
+        <span>Filter by service:</span>
+      </div>
+      <div class="streaming-filter-buttons">
+        <button class="streaming-filter-btn active" data-provider="all" onclick="filterByStreamingService('all')">
+          All
+        </button>
+        <button class="streaming-filter-btn" data-provider="8" onclick="filterByStreamingService(8)">
+          <img src="https://image.tmdb.org/t/p/original/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg" alt="Netflix">
+          Netflix
+        </button>
+        <button class="streaming-filter-btn" data-provider="1899" onclick="filterByStreamingService(1899)">
+          <img src="https://image.tmdb.org/t/p/original/fksCUZ9QDWZMUwL2LgMtLckROUN.jpg" alt="Max">
+          Max
+        </button>
+        <button class="streaming-filter-btn" data-provider="337" onclick="filterByStreamingService(337)">
+          <img src="https://image.tmdb.org/t/p/original/97yvRBw1GzX7fXprcF80er19ot.jpg" alt="Disney+">
+          Disney+
+        </button>
+        <button class="streaming-filter-btn" data-provider="350" onclick="filterByStreamingService(350)">
+          <img src="https://image.tmdb.org/t/p/original/6uhKBfmtzFqOcLousHwZuzcrScK.jpg" alt="Apple TV+">
+          Apple TV+
+        </button>
+        <button class="streaming-filter-btn" data-provider="9" onclick="filterByStreamingService(9)">
+          <img src="https://image.tmdb.org/t/p/original/emthp39XA2YScoYL1p0sdbAH2WA.jpg" alt="Amazon Prime">
+          Prime Video
+        </button>
+        <button class="streaming-filter-btn" data-provider="15" onclick="filterByStreamingService(15)">
+          <img src="https://image.tmdb.org/t/p/original/zxrQdKQoTjMBY4QPOHISaq3R4Uo.jpg" alt="Hulu">
+          Hulu
+        </button>
+        <button class="streaming-filter-btn" data-provider="531" onclick="filterByStreamingService(531)">
+          <img src="https://image.tmdb.org/t/p/original/xbhHHa1YgtpwhC8lb1NQ3ACVcLd.jpg" alt="Paramount+">
+          Paramount+
+        </button>
+        <button class="streaming-filter-btn" data-provider="386" onclick="filterByStreamingService(386)">
+          <img src="https://image.tmdb.org/t/p/original/xTHltMrZPAJFLQ6qyCBjAnXSmZt.jpg" alt="Peacock">
+          Peacock
+        </button>
+      </div>
+    </div>
     
     <!-- Recommended for You -->
     <section class="carousel-section">

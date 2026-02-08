@@ -81,6 +81,16 @@ db.exec(`
     viewed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS movie_ratings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    movie_id INTEGER NOT NULL,
+    rating REAL NOT NULL CHECK(rating >= 0.5 AND rating <= 10),
+    rated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, movie_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 // ==================== HELPER FUNCTIONS ====================
@@ -477,6 +487,85 @@ app.post('/api/track/view', authenticateToken, (req, res) => {
   db.prepare('INSERT INTO movie_views (user_id, movie_id) VALUES (?, ?)')
     .run(req.user.id, movie_id);
   res.json({ success: true });
+});
+
+// ==================== RATING ROUTES ====================
+
+// Rate a movie
+app.post('/api/rate', authenticateToken, (req, res) => {
+  const { movie_id, rating } = req.body;
+  if (!movie_id || rating === undefined) {
+    return res.status(400).json({ error: 'movie_id and rating are required' });
+  }
+  if (rating < 0.5 || rating > 10) {
+    return res.status(400).json({ error: 'Rating must be between 0.5 and 10' });
+  }
+  try {
+    db.prepare(`
+      INSERT INTO movie_ratings (user_id, movie_id, rating)
+      VALUES (?, ?, ?)
+      ON CONFLICT(user_id, movie_id) DO UPDATE SET rating = ?, rated_at = CURRENT_TIMESTAMP
+    `).run(req.user.id, movie_id, rating, rating);
+    res.json({ success: true, rating });
+  } catch (error) {
+    console.error('Rate error:', error);
+    res.status(500).json({ error: 'Error saving rating' });
+  }
+});
+
+// Remove a rating
+app.delete('/api/rate/:movieId', authenticateToken, (req, res) => {
+  db.prepare('DELETE FROM movie_ratings WHERE user_id = ? AND movie_id = ?')
+    .run(req.user.id, req.params.movieId);
+  res.json({ success: true });
+});
+
+// Get all user ratings
+app.get('/api/ratings', authenticateToken, (req, res) => {
+  const ratings = db.prepare('SELECT movie_id, rating FROM movie_ratings WHERE user_id = ? ORDER BY rated_at DESC')
+    .all(req.user.id);
+  res.json(ratings);
+});
+
+// ==================== WATCHED ROUTES ====================
+
+// Toggle watched status
+app.post('/api/watched/toggle', authenticateToken, (req, res) => {
+  const { movie_id } = req.body;
+  if (!movie_id) {
+    return res.status(400).json({ error: 'movie_id is required' });
+  }
+  const existing = db.prepare('SELECT id FROM watched_movies WHERE user_id = ? AND movie_id = ?')
+    .get(req.user.id, movie_id);
+  if (existing) {
+    db.prepare('DELETE FROM watched_movies WHERE user_id = ? AND movie_id = ?')
+      .run(req.user.id, movie_id);
+    res.json({ success: true, watched: false });
+  } else {
+    db.prepare('INSERT INTO watched_movies (user_id, movie_id) VALUES (?, ?)')
+      .run(req.user.id, movie_id);
+    res.json({ success: true, watched: true });
+  }
+});
+
+// Get all watched movie IDs
+app.get('/api/watched', authenticateToken, (req, res) => {
+  const watched = db.prepare('SELECT movie_id FROM watched_movies WHERE user_id = ? ORDER BY watched_at DESC')
+    .all(req.user.id);
+  res.json(watched.map(w => w.movie_id));
+});
+
+// Get movie-specific user status (rating + watched)
+app.get('/api/movie-status/:movieId', authenticateToken, (req, res) => {
+  const movieId = req.params.movieId;
+  const rating = db.prepare('SELECT rating FROM movie_ratings WHERE user_id = ? AND movie_id = ?')
+    .get(req.user.id, movieId);
+  const watched = db.prepare('SELECT id FROM watched_movies WHERE user_id = ? AND movie_id = ?')
+    .get(req.user.id, movieId);
+  res.json({
+    rating: rating ? rating.rating : null,
+    watched: !!watched
+  });
 });
 
 // ==================== CATCH-ALL ====================

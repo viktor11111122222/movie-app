@@ -91,6 +91,17 @@ db.exec(`
     UNIQUE(user_id, movie_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS site_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    category TEXT NOT NULL CHECK(category IN ('review', 'idea', 'bug', 'other')),
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT DEFAULT 'open' CHECK(status IN ('open', 'reviewed', 'resolved')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 // ==================== HELPER FUNCTIONS ====================
@@ -104,7 +115,7 @@ function authenticateToken(req, res, next) {
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    return res.status(401).json({ error: 'Нисте пријављени' });
+    return res.status(401).json({ error: 'Not authenticated' });
   }
 
   const session = db.prepare(`
@@ -137,37 +148,37 @@ function authenticateToken(req, res, next) {
 // Register
 app.post('/api/register', (req, res) => {
   try {
-    const { username, email, password, display_name } = req.body;
+    const { username, email, password, display_name, region } = req.body;
 
     // Validation
     if (!username || !email || !password) {
-      return res.status(400).json({ error: 'Сва поља су обавезна' });
+      return res.status(400).json({ error: 'All fields are required' });
     }
 
     if (username.length < 3) {
-      return res.status(400).json({ error: 'Корисничко име мора имати бар 3 карактера' });
+      return res.status(400).json({ error: 'Username must be at least 3 characters' });
     }
 
     if (password.length < 6) {
-      return res.status(400).json({ error: 'Лозинка мора имати бар 6 карактера' });
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
     // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: 'Неисправна имејл адреса' });
+      return res.status(400).json({ error: 'Invalid email address' });
     }
 
     // Check if username exists
     const existingUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
     if (existingUser) {
-      return res.status(400).json({ error: 'Корисничко име је заузето' });
+      return res.status(400).json({ error: 'Username is already taken' });
     }
 
     // Check if email exists
     const existingEmail = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
     if (existingEmail) {
-      return res.status(400).json({ error: 'Имејл адреса је већ регистрована' });
+      return res.status(400).json({ error: 'Email is already registered' });
     }
 
     // Hash password
@@ -181,10 +192,11 @@ app.post('/api/register', (req, res) => {
 
     const userId = result.lastInsertRowid;
 
-    // Create default settings
+    // Create settings with user's chosen region
+    const userRegion = (region && /^[A-Z]{2}$/i.test(region)) ? region.toUpperCase() : 'US';
     db.prepare(`
-      INSERT INTO user_settings (user_id) VALUES (?)
-    `).run(userId);
+      INSERT INTO user_settings (user_id, region) VALUES (?, ?)
+    `).run(userId, userRegion);
 
     // Create session
     const token = generateToken();
@@ -222,7 +234,7 @@ app.post('/api/register', (req, res) => {
 
   } catch (error) {
     console.error('Register error:', error);
-    res.status(500).json({ error: 'Грешка при регистрацији' });
+    res.status(500).json({ error: 'Registration error' });
   }
 });
 
@@ -232,7 +244,7 @@ app.post('/api/login', (req, res) => {
     const { login, password } = req.body;
 
     if (!login || !password) {
-      return res.status(400).json({ error: 'Сва поља су обавезна' });
+      return res.status(400).json({ error: 'All fields are required' });
     }
 
     // Find user by username or email
@@ -241,13 +253,13 @@ app.post('/api/login', (req, res) => {
     `).get(login, login);
 
     if (!user) {
-      return res.status(400).json({ error: 'Погрешно корисничко име или лозинка' });
+      return res.status(400).json({ error: 'Invalid username or password' });
     }
 
     // Check password
     const validPassword = bcrypt.compareSync(password, user.password);
     if (!validPassword) {
-      return res.status(400).json({ error: 'Погрешно корисничко име или лозинка' });
+      return res.status(400).json({ error: 'Invalid username or password' });
     }
 
     // Create session
@@ -289,7 +301,7 @@ app.post('/api/login', (req, res) => {
 
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Грешка при пријављивању' });
+    res.status(500).json({ error: 'Login error' });
   }
 });
 
@@ -566,6 +578,78 @@ app.get('/api/movie-status/:movieId', authenticateToken, (req, res) => {
     rating: rating ? rating.rating : null,
     watched: !!watched
   });
+});
+
+// ==================== FEEDBACK ROUTES ====================
+
+// Submit feedback
+app.post('/api/feedback', authenticateToken, (req, res) => {
+  const { category, title, message } = req.body;
+  if (!category || !title || !message) {
+    return res.status(400).json({ error: 'category, title and message are required' });
+  }
+  if (!['review', 'idea', 'bug', 'other'].includes(category)) {
+    return res.status(400).json({ error: 'Invalid category' });
+  }
+  if (title.length > 200) {
+    return res.status(400).json({ error: 'Title too long (max 200 chars)' });
+  }
+  if (message.length > 5000) {
+    return res.status(400).json({ error: 'Message too long (max 5000 chars)' });
+  }
+  try {
+    const result = db.prepare(
+      'INSERT INTO site_feedback (user_id, category, title, message) VALUES (?, ?, ?, ?)'
+    ).run(req.user.id, category, title, message);
+    res.json({ success: true, id: result.lastInsertRowid });
+  } catch (error) {
+    console.error('Feedback error:', error);
+    res.status(500).json({ error: 'Error saving feedback' });
+  }
+});
+
+// Get all feedback (public, shows username)
+app.get('/api/feedback', (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const category = req.query.category || null;
+
+  let query = `
+    SELECT f.id, f.category, f.title, f.message, f.status, f.created_at,
+           u.username, u.display_name, u.avatar_type, u.avatar_color, u.avatar_image
+    FROM site_feedback f
+    JOIN users u ON f.user_id = u.id
+  `;
+  const params = [];
+  if (category && ['review', 'idea', 'bug', 'other'].includes(category)) {
+    query += ' WHERE f.category = ?';
+    params.push(category);
+  }
+  query += ' ORDER BY f.created_at DESC LIMIT ? OFFSET ?';
+  params.push(limit, offset);
+
+  const feedback = db.prepare(query).all(...params);
+
+  // Get total count
+  let countQuery = 'SELECT COUNT(*) as total FROM site_feedback';
+  const countParams = [];
+  if (category && ['review', 'idea', 'bug', 'other'].includes(category)) {
+    countQuery += ' WHERE category = ?';
+    countParams.push(category);
+  }
+  const { total } = db.prepare(countQuery).get(...countParams);
+
+  res.json({ feedback, total, page, pages: Math.ceil(total / limit) });
+});
+
+// Delete own feedback
+app.delete('/api/feedback/:id', authenticateToken, (req, res) => {
+  const fb = db.prepare('SELECT user_id FROM site_feedback WHERE id = ?').get(req.params.id);
+  if (!fb) return res.status(404).json({ error: 'Feedback not found' });
+  if (fb.user_id !== req.user.id) return res.status(403).json({ error: 'Not authorized' });
+  db.prepare('DELETE FROM site_feedback WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
 });
 
 // ==================== CATCH-ALL ====================

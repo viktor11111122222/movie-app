@@ -79,6 +79,13 @@ function syncUserDataToLocal(data) {
       trackHistory: data.settings.track_history
     };
     localStorage.setItem('appSettings', JSON.stringify(appSettings));
+
+    // Apply user's saved region to the streaming system
+    if (data.settings.region) {
+      userRegion = data.settings.region;
+      regionDetectionPromise = Promise.resolve(userRegion);
+      console.log(`🌍 Using saved user region: ${userRegion}`);
+    }
   }
 
   // Sync watchlist
@@ -122,11 +129,11 @@ function switchAuthForm(formType) {
   if (formType === 'register') {
     loginForm.style.display = 'none';
     registerForm.style.display = 'flex';
-    if (subtitle) subtitle.textContent = 'Креирај налог да откријеш филмове';
+    if (subtitle) subtitle.textContent = 'Create account to discover movies';
   } else {
     loginForm.style.display = 'flex';
     registerForm.style.display = 'none';
-    if (subtitle) subtitle.textContent = 'Пријави се да откријеш филмове';
+    if (subtitle) subtitle.textContent = 'Sign in to discover movies';
   }
 }
 
@@ -162,7 +169,7 @@ async function handleLogin(event) {
   // Disable button, show spinner
   btn.disabled = true;
   spinner.style.display = 'block';
-  btnText.textContent = 'Пријављивање...';
+  btnText.textContent = 'Signing in...';
 
   const login = document.getElementById('loginUsername').value.trim();
   const password = document.getElementById('loginPassword').value;
@@ -177,10 +184,10 @@ async function handleLogin(event) {
     const data = await res.json();
 
     if (!res.ok) {
-      showAuthError('login', data.error || 'Грешка при пријављивању');
+      showAuthError('login', data.error || 'Login error');
       btn.disabled = false;
       spinner.style.display = 'none';
-      btnText.textContent = 'Пријави се';
+      btnText.textContent = 'Sign In';
       return;
     }
 
@@ -198,10 +205,10 @@ async function handleLogin(event) {
 
   } catch (error) {
     console.error('Login error:', error);
-    showAuthError('login', 'Грешка при повезивању са сервером');
+    showAuthError('login', 'Error connecting to server');
     btn.disabled = false;
     spinner.style.display = 'none';
-    btnText.textContent = 'Пријави се';
+    btnText.textContent = 'Sign In';
   }
 }
 
@@ -216,32 +223,39 @@ async function handleRegister(event) {
   const email = document.getElementById('registerEmail').value.trim();
   const password = document.getElementById('registerPassword').value;
   const passwordConfirm = document.getElementById('registerPasswordConfirm').value;
+  const region = document.getElementById('registerRegion').value;
 
   // Validate passwords match
   if (password !== passwordConfirm) {
-    showAuthError('register', 'Лозинке се не поклапају');
+    showAuthError('register', 'Passwords do not match');
+    return;
+  }
+
+  // Validate region selected
+  if (!region) {
+    showAuthError('register', 'Choose your region');
     return;
   }
 
   // Disable button, show spinner
   btn.disabled = true;
   spinner.style.display = 'block';
-  btnText.textContent = 'Креирање налога...';
+  btnText.textContent = 'Creating account...';
 
   try {
     const res = await fetch('/api/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, email, password, display_name })
+      body: JSON.stringify({ username, email, password, display_name, region })
     });
 
     const data = await res.json();
 
     if (!res.ok) {
-      showAuthError('register', data.error || 'Грешка при регистрацији');
+      showAuthError('register', data.error || 'Registration error');
       btn.disabled = false;
       spinner.style.display = 'none';
-      btnText.textContent = 'Креирај налог';
+      btnText.textContent = 'Create Account';
       return;
     }
 
@@ -257,14 +271,14 @@ async function handleRegister(event) {
     hideAuthScreen();
     initializeApp();
 
-    showNotification('Добродошао, ' + (data.user.display_name || data.user.username) + '! 🎬');
+    showNotification('Welcome, ' + (data.user.display_name || data.user.username) + '! 🎬');
 
   } catch (error) {
     console.error('Register error:', error);
-    showAuthError('register', 'Грешка при повезивању са сервером');
+    showAuthError('register', 'Error connecting to server');
     btn.disabled = false;
     spinner.style.display = 'none';
-    btnText.textContent = 'Креирај налог';
+    btnText.textContent = 'Create Account';
   }
 }
 
@@ -404,7 +418,7 @@ let userDataLoaded = false;
 
 // Load user ratings & watched from server
 async function loadUserMovieData() {
-  if (!authToken || userDataLoaded) return;
+  if (!authToken) return;
   try {
     const [ratingsRes, watchedRes] = await Promise.all([
       apiCall('/api/ratings'),
@@ -412,10 +426,12 @@ async function loadUserMovieData() {
     ]);
     if (ratingsRes.ok) {
       const ratings = await ratingsRes.json();
+      userRatings = {}; // Reset before repopulating
       ratings.forEach(r => { userRatings[r.movie_id] = r.rating; });
     }
     if (watchedRes.ok) {
       const watched = await watchedRes.json();
+      userWatched = {}; // Reset before repopulating
       watched.forEach(id => { userWatched[id] = true; });
     }
     userDataLoaded = true;
@@ -458,6 +474,16 @@ let regionDetectionPromise = null;
 async function detectUserRegion() {
   if (userRegion) return userRegion;
   if (regionDetectionPromise) return regionDetectionPromise;
+  
+  // Check if user has a saved region in settings
+  const savedSettings = JSON.parse(localStorage.getItem('appSettings') || '{}');
+  if (savedSettings.region && savedSettings.region !== 'US') {
+    userRegion = savedSettings.region;
+    regionDetectionPromise = Promise.resolve(userRegion);
+    console.log(`🌍 Using saved region from settings: ${userRegion}`);
+    updateRegionDisplay();
+    return userRegion;
+  }
   
   regionDetectionPromise = (async () => {
     // Try multiple free geolocation APIs with fallback
@@ -1024,14 +1050,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Initialize the main app after auth
-function initializeApp() {
+async function initializeApp() {
   console.log('🎬 Initializing app for user:', currentUser?.display_name || currentUser?.username);
   detectUserRegion(); // Start detecting region immediately
   loadGenres();
   loadHeroMovie();
   updateWishlistCount();
   loadMoviesForCarousels();
-  loadUserMovieData(); // Load ratings & watched status
+  await loadUserMovieData(); // Load ratings & watched status — AWAIT so data is ready
   loadProfile();
   loadSettings();
   translatePage();
@@ -1810,13 +1836,6 @@ async function openMovieModal(movie) {
   
   // Setup watched button + rating stars
   currentModalMovie = movie;
-  const watchedBtn = document.getElementById('movieModalWatchedBtn');
-  if (watchedBtn) {
-    // Remove any existing event listeners and add new one
-    watchedBtn.replaceWith(watchedBtn.cloneNode(true));
-    const newWatchedBtn = document.getElementById('movieModalWatchedBtn');
-    newWatchedBtn.addEventListener('click', toggleWatchedFromModal);
-  }
   setupWatchedButton(movie);
   setupRatingStars(movie);
   
@@ -2031,20 +2050,27 @@ function toggleWishlistForModal(movie, button) {
 // ==================== RATING & WATCHED SYSTEM ====================
 let currentModalMovie = null;
 
-// Setup watched button state
+// Setup watched button — uses the SAME .onclick pattern as the working wishlist button
 function setupWatchedButton(movie) {
   const btn = document.getElementById('movieModalWatchedBtn');
-  const badge = document.getElementById('movieModalWatchedBadge');
-  console.log('🔧 Setting up watched button for:', movie.title, 'Button found:', !!btn);
   if (!btn) return;
   
+  // Set initial UI from cached data
   const isWatched = userWatched[movie.id] === true;
   updateWatchedUI(isWatched);
   
-  // Also fetch from server to be sure
+  // Attach click handler — .onclick on the button element is NOT removed by innerHTML changes
+  btn.onclick = function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleWatchedFromModal();
+  };
+  
+  // Fetch latest status from server (won't overwrite if user already toggled)
   if (authToken) {
+    const fetchMovieId = movie.id;
     apiCall(`/api/movie-status/${movie.id}`).then(async res => {
-      if (res.ok) {
+      if (res.ok && currentModalMovie && currentModalMovie.id === fetchMovieId) {
         const data = await res.json();
         userWatched[movie.id] = data.watched;
         if (data.rating !== null) userRatings[movie.id] = data.rating;
@@ -2058,28 +2084,26 @@ function setupWatchedButton(movie) {
 function updateWatchedUI(isWatched) {
   const btn = document.getElementById('movieModalWatchedBtn');
   const badge = document.getElementById('movieModalWatchedBadge');
-  console.log('🎯 Updating watched UI:', isWatched, 'Button found:', !!btn);
   if (!btn) return;
   
   if (isWatched) {
-    btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Watched`;
-    btn.classList.add('active');
+    btn.className = 'movie-modal-watched-btn active';
+    btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Watched';
     if (badge) badge.style.display = 'flex';
   } else {
-    btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg> Mark as Watched`;
-    btn.classList.remove('active');
+    btn.className = 'movie-modal-watched-btn';
+    btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg> Mark as Watched';
     if (badge) badge.style.display = 'none';
   }
-  console.log('✅ Button updated, classes:', btn.className);
 }
 
 async function toggleWatchedFromModal() {
-  console.log('🎬 Toggle watched called, currentModalMovie:', currentModalMovie?.title, 'authToken:', !!authToken);
-  if (!currentModalMovie || !authToken) return;
+  if (!currentModalMovie || !authToken) {
+    showNotification('Log in to mark movies as watched');
+    return;
+  }
   const movieId = currentModalMovie.id;
   const wasWatched = userWatched[movieId] === true;
-  
-  console.log('📊 Current watched state:', wasWatched, 'toggling to:', !wasWatched);
   
   // Optimistic update
   userWatched[movieId] = !wasWatched;
@@ -2098,7 +2122,7 @@ async function toggleWatchedFromModal() {
     // Revert on error
     userWatched[movieId] = wasWatched;
     updateWatchedUI(wasWatched);
-    console.error('Failed to toggle watched:', e);
+    showNotification('Failed to update — try again');
   }
 }
 
@@ -2176,6 +2200,260 @@ async function clearRating() {
   }
 }
 // ==================== END RATING & WATCHED ====================
+
+// ==================== PRIVACY POLICY MODAL ====================
+function openPrivacyModal() {
+  const modal = document.getElementById('privacyModal');
+  if (modal) {
+    modal.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+}
+
+function closePrivacyModal() {
+  const modal = document.getElementById('privacyModal');
+  if (modal) {
+    modal.classList.remove('active');
+    document.body.style.overflow = 'auto';
+  }
+}
+
+// ==================== FEEDBACK SYSTEM ====================
+let currentFeedbackFilter = null;
+let currentFeedbackPage = 1;
+
+function openFeedbackModal() {
+  const modal = document.getElementById('feedbackModal');
+  if (modal) {
+    modal.classList.add('active');
+    document.body.style.overflow = 'hidden';
+    // Default to write tab
+    switchFeedbackTab('write');
+  }
+}
+
+function closeFeedbackModal() {
+  const modal = document.getElementById('feedbackModal');
+  if (modal) {
+    modal.classList.remove('active');
+    document.body.style.overflow = 'auto';
+  }
+}
+
+function switchFeedbackTab(tab) {
+  const writeTab = document.getElementById('feedbackWriteTab');
+  const browseTab = document.getElementById('feedbackBrowseTab');
+  const tabs = document.querySelectorAll('.feedback-tab');
+
+  tabs.forEach((t, i) => {
+    t.classList.toggle('active', (tab === 'write' && i === 0) || (tab === 'browse' && i === 1));
+  });
+
+  if (tab === 'write') {
+    writeTab.style.display = 'block';
+    browseTab.style.display = 'none';
+  } else {
+    writeTab.style.display = 'none';
+    browseTab.style.display = 'block';
+    currentFeedbackPage = 1;
+    loadFeedbackList();
+  }
+}
+
+async function submitFeedback(e) {
+  e.preventDefault();
+  if (!authToken) {
+    showNotification('Log in to submit feedback');
+    return;
+  }
+
+  const category = document.querySelector('input[name="feedbackCategory"]:checked')?.value;
+  const title = document.getElementById('feedbackTitle').value.trim();
+  const message = document.getElementById('feedbackMessage').value.trim();
+
+  if (!category || !title || !message) {
+    showNotification('Please fill in all fields');
+    return;
+  }
+
+  const btn = document.getElementById('feedbackSubmitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+
+  try {
+    const res = await apiCall('/api/feedback', {
+      method: 'POST',
+      body: JSON.stringify({ category, title, message })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showNotification('✅ Feedback submitted! Thank you!');
+      document.getElementById('feedbackForm').reset();
+      document.getElementById('feedbackCharCount').textContent = '0';
+    } else {
+      showNotification(data.error || 'Failed to submit');
+    }
+  } catch (err) {
+    console.error('Feedback submit error:', err);
+    showNotification('Error submitting feedback');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg> Send Feedback';
+  }
+}
+
+function filterFeedback(category) {
+  currentFeedbackFilter = category;
+  currentFeedbackPage = 1;
+  document.querySelectorAll('.feedback-filter').forEach(btn => {
+    const cat = btn.dataset.cat;
+    btn.classList.toggle('active', category === null ? cat === 'all' : cat === category);
+  });
+  loadFeedbackList();
+}
+
+async function loadFeedbackList(append = false) {
+  const listEl = document.getElementById('feedbackList');
+  if (!listEl) return;
+
+  if (!append) {
+    listEl.innerHTML = '<div class="feedback-loading">Loading feedback...</div>';
+  }
+
+  let url = `/api/feedback?page=${currentFeedbackPage}`;
+  if (currentFeedbackFilter) url += `&category=${currentFeedbackFilter}`;
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!append) listEl.innerHTML = '';
+
+    if (data.feedback.length === 0 && currentFeedbackPage === 1) {
+      listEl.innerHTML = `
+        <div class="feedback-empty">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <p>No feedback yet. Be the first to share!</p>
+        </div>
+      `;
+      return;
+    }
+
+    data.feedback.forEach(fb => {
+      const catEmoji = { review: '⭐', idea: '💡', bug: '🐛', other: '💬' }[fb.category] || '💬';
+      const catLabel = fb.category.charAt(0).toUpperCase() + fb.category.slice(1);
+      const displayName = fb.display_name || fb.username;
+      const initial = displayName.charAt(0).toUpperCase();
+      const avatarBg = fb.avatar_type === 'color' ? (fb.avatar_color || '#6366f1') : '#6366f1';
+      const date = new Date(fb.created_at + 'Z');
+      const timeAgo = getTimeAgo(date);
+      const isOwn = currentUser && currentUser.username === fb.username;
+
+      const item = document.createElement('div');
+      item.className = 'feedback-item';
+      item.innerHTML = `
+        <div class="feedback-item-header">
+          <span class="feedback-item-title">${escapeHTML(fb.title)}</span>
+          <span class="feedback-item-cat ${fb.category}">${catEmoji} ${catLabel}</span>
+        </div>
+        <div class="feedback-item-message">${escapeHTML(fb.message)}</div>
+        <div class="feedback-item-footer">
+          <div class="feedback-item-user">
+            <span class="feedback-item-avatar" style="background:${avatarBg}">${initial}</span>
+            <span>${escapeHTML(displayName)}</span>
+            <span class="feedback-item-date">• ${timeAgo}</span>
+          </div>
+          ${isOwn ? `<button class="feedback-item-delete" title="Delete" onclick="deleteFeedback(${fb.id}, this)">🗑️</button>` : ''}
+        </div>
+      `;
+      listEl.appendChild(item);
+    });
+
+    // Remove existing load more buttons
+    const existingBtn = listEl.querySelector('.feedback-load-more');
+    if (existingBtn) existingBtn.remove();
+
+    // Add load more button if more pages
+    if (data.page < data.pages) {
+      const loadMoreBtn = document.createElement('button');
+      loadMoreBtn.className = 'feedback-load-more';
+      loadMoreBtn.textContent = 'Load More';
+      loadMoreBtn.onclick = () => {
+        currentFeedbackPage++;
+        loadFeedbackList(true);
+      };
+      listEl.appendChild(loadMoreBtn);
+    }
+  } catch (err) {
+    console.error('Load feedback error:', err);
+    if (!append) {
+      listEl.innerHTML = '<div class="feedback-loading">Failed to load feedback</div>';
+    }
+  }
+}
+
+async function deleteFeedback(id, btnEl) {
+  if (!confirm('Delete this feedback?')) return;
+  try {
+    const res = await apiCall(`/api/feedback/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      const item = btnEl.closest('.feedback-item');
+      if (item) {
+        item.style.opacity = '0';
+        item.style.transform = 'translateX(20px)';
+        item.style.transition = 'all 0.3s ease';
+        setTimeout(() => item.remove(), 300);
+      }
+      showNotification('Feedback deleted');
+    }
+  } catch (err) {
+    showNotification('Failed to delete');
+  }
+}
+
+function getTimeAgo(date) {
+  const seconds = Math.floor((new Date() - date) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
+
+function escapeHTML(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// Char counter for feedback textarea
+document.addEventListener('DOMContentLoaded', () => {
+  const textarea = document.getElementById('feedbackMessage');
+  if (textarea) {
+    textarea.addEventListener('input', () => {
+      const counter = document.getElementById('feedbackCharCount');
+      if (counter) counter.textContent = textarea.value.length;
+    });
+  }
+});
+
+// Close privacy/feedback modals on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closePrivacyModal();
+    closeFeedbackModal();
+  }
+});
+
+// ==================== END PRIVACY & FEEDBACK ====================
 function openFullscreenTrailerForMovie(trailerKey) {
   console.log('🎬 Opening trailer from movie modal');
   
@@ -3212,8 +3490,26 @@ function changeLanguage(select) {
 }
 
 function changeRegion(select) {
+  const newRegion = select.value;
   saveSettings();
-  showNotification(`Region changed to ${select.options[select.selectedIndex].text}`);
+  
+  // Update the global userRegion so streaming system uses the new region
+  userRegion = newRegion;
+  regionDetectionPromise = Promise.resolve(newRegion);
+  
+  // Clear provider cache so badges re-fetch with the new region
+  providerCache.clear();
+  
+  // Update streaming filter label
+  updateRegionDisplay();
+  
+  showNotification(`🌍 Region changed to ${select.options[select.selectedIndex].text}`);
+  
+  // Reload movie carousels with new region data
+  showLoadingOverlay('Updating movies for your region...');
+  loadMoviesForCarousels().then(() => {
+    hideLoadingOverlay();
+  });
 }
 
 function toggleHistory(checkbox) {

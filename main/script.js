@@ -444,6 +444,9 @@ async function loadUserMovieData() {
 // Search debounce timer
 let searchTimeout;
 
+// Trailer state
+let trailerOpenedFromMovieModal = false;
+
 // Globalne promenljive za žanrove i filmove
 let allGenres = {};
 let allTopRatedMovies = [];
@@ -932,14 +935,22 @@ function closeTrailerModal() {
     }, 300);
   }
   
-  // Vrati background video
-  if (videoContainer) {
-    videoContainer.style.opacity = '1';
+  // Ako je trailer otvoren iz movie modala, vrati se na movie modal
+  if (trailerOpenedFromMovieModal) {
+    trailerOpenedFromMovieModal = false;
+    // Movie modal je još uvek otvoren ispod — samo sakrij trailer
+    document.body.style.overflow = 'hidden'; // Ostavi hidden jer je movie modal otvoren
+    console.log('↩️ Returning to movie modal');
+  } else {
+    // Otvoren iz hero sekcije — vrati background video
+    if (videoContainer) {
+      videoContainer.style.opacity = '1';
+    }
+    if (heroContent) heroContent.style.opacity = '1';
+    document.body.style.overflow = 'auto';
   }
   
-  if (heroContent) heroContent.style.opacity = '1';
-  
-  // Vrati X dugme na vidljivo
+  // Sakrij X dugme
   if (closeBtn) {
     closeBtn.style.opacity = '0';
     closeBtn.style.pointerEvents = 'none';
@@ -951,9 +962,7 @@ function closeTrailerModal() {
   // Očisti timeout
   clearTimeout(cursorTimeout);
   
-  document.body.style.overflow = 'auto';
-  
-  console.log('❌ Trailer zoom closed');
+  console.log('❌ Trailer closed');
 }
 
 // Zatvori modal sa ESC tastom
@@ -1046,21 +1055,55 @@ window.addEventListener('DOMContentLoaded', async () => {
   
   if (isAuthenticated) {
     initializeApp();
+  } else {
+    // Hide splash screen for auth page
+    setTimeout(() => hideSplashScreen(), 800);
   }
 });
 
 // Initialize the main app after auth
 async function initializeApp() {
+  // This function is overridden at the bottom of the file with enhanced initialization
+  // Show splash while loading
+  const splash = document.getElementById('splashScreen');
+  
   console.log('🎬 Initializing app for user:', currentUser?.display_name || currentUser?.username);
-  detectUserRegion(); // Start detecting region immediately
+  detectUserRegion();
   loadGenres();
   loadHeroMovie();
   updateWishlistCount();
   loadMoviesForCarousels();
-  await loadUserMovieData(); // Load ratings & watched status — AWAIT so data is ready
+  await loadUserMovieData();
   loadProfile();
   loadSettings();
   translatePage();
+  
+  // New features initialization
+  renderRecentlyViewed();
+  updateBottomNavBadge();
+  initPullToRefresh();
+  initScrollHeader();
+  initBackToTop();
+  initDoubleTapLike();
+  
+  // Initialize carousel swipes after a delay (so carousels are rendered)
+  setTimeout(() => {
+    initAllCarouselSwipes();
+  }, 2000);
+  
+  // Hide splash screen
+  setTimeout(() => {
+    hideSplashScreen();
+  }, 1500);
+  
+  // Handle URL shortcuts for PWA
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('action') === 'watchlist') {
+    setTimeout(() => openWishlistModal(), 800);
+  } else if (urlParams.get('action') === 'search') {
+    setTimeout(() => document.getElementById('searchInput')?.focus(), 800);
+  }
+  
   console.log('📋 Current wishlist:', wishlist);
 }
 
@@ -1280,6 +1323,14 @@ function renderMovieCards(container, movies, isTrending = false) {
       ? movie.genre_ids.slice(0, 2).map(id => allGenres[id]).filter(Boolean).join(', ')
       : '';
     
+    // Watched badge
+    if (userWatched[movie.id]) {
+      const watchedBadge = document.createElement('div');
+      watchedBadge.className = 'movie-card-watched-badge';
+      watchedBadge.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Watched`;
+      card.appendChild(watchedBadge);
+    }
+
     const overlay = document.createElement('div');
     overlay.className = 'movie-card-overlay';
     overlay.innerHTML = `
@@ -1870,9 +1921,24 @@ async function openMovieModal(movie) {
     
     console.log('🔍 Provider data for', movie.title, '(region:', region, '):', data);
     
-    // SAMO korisnikov region — ne probaj druge regione
-    const providersFound = data.results?.[region] || null;
-    const selectedRegion = region;
+    // Proverava korisnikov region prvo, zatim backup regione ako nema podataka
+    let providersFound = data.results?.[region] || null;
+    let selectedRegion = region;
+    
+    // Ako nema providera u korisnikovom regionu, proveri backup regione
+    if (!providersFound || (!providersFound.flatrate && !providersFound.buy && !providersFound.rent)) {
+      const backupRegions = ['US', 'GB', 'CA', 'DE', 'AU', 'FR'];
+      for (const backupRegion of backupRegions) {
+        if (backupRegion === region) continue; // Skip već provereni region
+        const backupData = data.results?.[backupRegion];
+        if (backupData && (backupData.flatrate || backupData.buy || backupData.rent)) {
+          providersFound = backupData;
+          selectedRegion = backupRegion;
+          console.log(`🔄 Using backup region ${backupRegion} for providers`);
+          break;
+        }
+      }
+    }
     
     const providersContainer = document.getElementById('movieModalProviders');
     
@@ -1928,13 +1994,19 @@ async function openMovieModal(movie) {
       
       providersContainer.innerHTML = providersHTML;
     } else {
-      providersContainer.innerHTML = '<p class="no-providers">Streaming info not available in your region</p>';
+      providersContainer.innerHTML = '<p class="no-providers">Streaming info not available in any region</p>';
     }
     
   } catch (error) {
     console.error('Error loading providers:', error);
     document.getElementById('movieModalProviders').innerHTML = '<p class="no-providers">Error loading streaming info</p>';
   }
+  
+  // Load similar movies
+  loadSimilarMovies(movie.id);
+  
+  // Track in recently viewed
+  addToRecentlyViewed(movie);
 }
 
 // Kreiraj movie modal HTML
@@ -1968,6 +2040,16 @@ function createMovieModal() {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
               Mark as Watched
             </button>
+            <button class="movie-modal-share-btn" id="movieModalShareBtn" onclick="shareMovie()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="18" cy="5" r="3"></circle>
+                <circle cx="6" cy="12" r="3"></circle>
+                <circle cx="18" cy="19" r="3"></circle>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+              </svg>
+              Share
+            </button>
           </div>
           <div class="movie-modal-user-rating" id="movieModalUserRating">
             <span class="user-rating-label">Your Rating:</span>
@@ -1986,6 +2068,12 @@ function createMovieModal() {
               <p>Loading...</p>
             </div>
           </div>
+          <div class="movie-modal-similar" id="movieModalSimilar">
+            <h3>Similar Movies</h3>
+            <div class="similar-movies-list" id="similarMoviesList">
+              <p>Loading...</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1999,8 +2087,14 @@ function closeMovieModal() {
   const modal = document.getElementById('movieModal');
   if (modal) {
     modal.classList.remove('active');
-    document.body.style.overflow = 'auto';
+    // If we came from search results, keep body overflow hidden for the search modal
+    if (openedFromSearch && searchModal && searchModal.classList.contains('active')) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'auto';
+    }
   }
+  openedFromSearch = false;
   console.log('✕ Movie modal closed');
 }
 
@@ -2117,13 +2211,30 @@ async function toggleWatchedFromModal() {
     const data = await res.json();
     userWatched[movieId] = data.watched;
     updateWatchedUI(data.watched);
+    updateCardWatchedBadge(movieId, data.watched);
     showNotification(data.watched ? '✅ Marked as watched' : '↩️ Unmarked as watched');
   } catch (e) {
     // Revert on error
     userWatched[movieId] = wasWatched;
     updateWatchedUI(wasWatched);
+    updateCardWatchedBadge(movieId, wasWatched);
     showNotification('Failed to update — try again');
   }
+}
+
+// Update watched badge on movie cards in carousels
+function updateCardWatchedBadge(movieId, isWatched) {
+  document.querySelectorAll(`.movie-card[data-movie-id="${movieId}"]`).forEach(card => {
+    let badge = card.querySelector('.movie-card-watched-badge');
+    if (isWatched && !badge) {
+      badge = document.createElement('div');
+      badge.className = 'movie-card-watched-badge';
+      badge.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Watched';
+      card.appendChild(badge);
+    } else if (!isWatched && badge) {
+      badge.remove();
+    }
+  });
 }
 
 // Setup rating stars
@@ -2457,44 +2568,48 @@ document.addEventListener('keydown', (e) => {
 function openFullscreenTrailerForMovie(trailerKey) {
   console.log('🎬 Opening trailer from movie modal');
   
-  // Prvo zatvori movie modal
-  closeMovieModal();
+  // Zapamti da smo otvorili iz movie modala — NE zatvaraj movie modal
+  trailerOpenedFromMovieModal = true;
   
-  // Sačekaj malo da se zatvori movie modal, pa otvori trailer
+  const modal = document.getElementById('trailerModal');
+  const closeBtn = document.querySelector('.trailer-modal-close');
+  
+  // Kreiraj novi fullscreen iframe sa zvukom
+  const fullscreenVideo = document.createElement('div');
+  fullscreenVideo.className = 'fullscreen-trailer-container';
+  fullscreenVideo.id = 'fullscreenTrailer';
+  const qualityParam = getVideoQualityParam();
+  fullscreenVideo.innerHTML = `
+    <iframe
+      src="https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&mute=0&controls=1&showinfo=0&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3${qualityParam}"
+      frameborder="0"
+      allow="autoplay; encrypted-media"
+      allowfullscreen
+    ></iframe>
+  `;
+  
+  document.body.appendChild(fullscreenVideo);
+  
+  // Prikaži modal overlay
+  modal.classList.add('active');
+  
+  // Odmah prikaži X dugme (ne čekaj cursor move)
+  if (closeBtn) {
+    closeBtn.style.opacity = '1';
+    closeBtn.style.pointerEvents = 'all';
+  }
+  
+  // Animiraj pojavu
   setTimeout(() => {
-    const modal = document.getElementById('trailerModal');
-    
-    // Kreiraj novi fullscreen iframe sa zvukom
-    const fullscreenVideo = document.createElement('div');
-    fullscreenVideo.className = 'fullscreen-trailer-container';
-    fullscreenVideo.id = 'fullscreenTrailer';
-    const qualityParam = getVideoQualityParam();
-    fullscreenVideo.innerHTML = `
-      <iframe
-        src="https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&mute=0&controls=1&showinfo=0&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3${qualityParam}"
-        frameborder="0"
-        allow="autoplay; encrypted-media"
-        allowfullscreen
-      ></iframe>
-    `;
-    
-    document.body.appendChild(fullscreenVideo);
-    
-    // Prikaži modal overlay
-    modal.classList.add('active');
-    
-    // Animiraj pojavu
-    setTimeout(() => {
-      fullscreenVideo.classList.add('active');
-    }, 10);
-    
-    document.body.style.overflow = 'hidden';
-    
-    // Dodaj event listener za pomeranje miša
-    document.addEventListener('mousemove', handleCursorMove);
-    
-    console.log('✅ Trailer opened');
-  }, 300);
+    fullscreenVideo.classList.add('active');
+  }, 10);
+  
+  document.body.style.overflow = 'hidden';
+  
+  // Dodaj event listener za pomeranje miša (za auto-hide posle nekog vremena)
+  document.addEventListener('mousemove', handleCursorMove);
+  
+  console.log('✅ Trailer opened over movie modal');
 }
 
 // Export za korišćenje u drugim delovima aplikacije
@@ -2511,10 +2626,35 @@ const searchDropdown = document.getElementById('searchDropdown');
 const searchModal = document.getElementById('searchModal');
 const searchResults = document.getElementById('searchResults');
 
+const searchClearBtn = document.getElementById('searchClearBtn');
+
+function updateSearchClearBtn() {
+  if (searchClearBtn) {
+    if (searchInput.value.length > 0) {
+      searchClearBtn.classList.add('visible');
+      searchInput.style.paddingRight = '80px';
+    } else {
+      searchClearBtn.classList.remove('visible');
+      searchInput.style.paddingRight = '50px';
+    }
+  }
+}
+
+if (searchClearBtn) {
+  searchClearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    updateSearchClearBtn();
+    closeSearchDropdown();
+    closeSearchModal();
+    searchInput.focus();
+  });
+}
+
 if (searchInput) {
   // Dropdown search while typing
   searchInput.addEventListener('input', (e) => {
     const query = e.target.value.trim();
+    updateSearchClearBtn();
     
     clearTimeout(searchTimeout);
     
@@ -2670,6 +2810,8 @@ function displaySearchError() {
   searchResults.innerHTML = '<p style="text-align: center; color: rgba(255,100,100,0.8); padding: 40px;">Error loading search results. Please try again.</p>';
 }
 
+let openedFromSearch = false;
+
 async function openMovieModalFromSearch(movieId) {
   try {
     const response = await fetch(`${TMDB_BASE_URL}/movie/${movieId}?api_key=${TMDB_API_KEY}&language=en-US`);
@@ -2678,10 +2820,12 @@ async function openMovieModalFromSearch(movieId) {
     // Get genres
     movie.genre_ids = movie.genres ? movie.genres.map(g => g.id) : [];
     
+    // Remember we came from search
+    openedFromSearch = searchModal.classList.contains('active');
+    
     openMovieModal(movie);
-    closeSearchModal();
     closeSearchDropdown();
-    searchInput.value = ''; // Clear search input
+    // Don't close search modal or clear input - user should return to search results
   } catch (error) {
     console.error('❌ Error loading movie:', error);
     showNotification('Error loading movie details');
@@ -2690,6 +2834,7 @@ async function openMovieModalFromSearch(movieId) {
 
 function closeSearchModal() {
   searchModal.classList.remove('active');
+  document.body.style.overflow = 'auto';
 }
 
 // Profile Dropdown
@@ -3205,7 +3350,7 @@ function translatePage() {
   // Hero section buttons
   const watchTrailerBtn = document.querySelector('.btn-primary');
   if (watchTrailerBtn && (watchTrailerBtn.textContent.includes('Watch') || watchTrailerBtn.textContent.includes('Гледај'))) {
-    watchTrailerBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>${t.watchTrailer}`;
+    watchTrailerBtn.innerHTML = `<svg width="20" height="20" style="align-items: center;" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>${t.watchTrailer}`;
   }
   
   const addToWatchlistBtn = document.querySelector('.btn-secondary');
@@ -3214,8 +3359,8 @@ function translatePage() {
     addToWatchlistBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" ${isInWishlist ? 'fill="currentColor"' : ''}/></svg>${isInWishlist ? t.removeFromWatchlist : t.addToWatchlist}`;
   }
   
-  // Section titles
-  const sectionTitles = document.querySelectorAll('.section-title');
+  // Section titles — only inside .carousel-section, not .recently-viewed-wrapper
+  const sectionTitles = document.querySelectorAll('.carousel-section .section-title');
   const titleMap = [t.recommended, t.trending, t.topRated, t.newReleases, t.popular, t.upcoming, t.highestRated, t.classics];
   sectionTitles.forEach((title, index) => {
     if (titleMap[index]) title.textContent = titleMap[index];
@@ -3565,3 +3710,566 @@ function updateProfileStats() {
   const movieViews = parseInt(localStorage.getItem('movieViews')) || 0;
   document.getElementById('movieViewsCount').textContent = movieViews;
 }
+
+// ==================== SHARE MOVIE FEATURE ====================
+async function shareMovie() {
+  if (!currentModalMovie) return;
+  
+  const movie = currentModalMovie;
+  const title = movie.title;
+  const year = movie.release_date ? movie.release_date.split('-')[0] : '';
+  const rating = movie.vote_average ? movie.vote_average.toFixed(1) : 'N/A';
+  const text = `🎬 Check out "${title}" (${year}) - ⭐ ${rating}/10\n\nDiscovered on MovieHub`;
+  const url = `https://www.themoviedb.org/movie/${movie.id}`;
+  
+  // Try native Web Share API first (works great on mobile / iOS / Android)
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: `${title} (${year})`, text, url });
+      showNotification('Shared successfully!');
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('Share failed:', err);
+        fallbackShare(text, url);
+      }
+    }
+  } else {
+    fallbackShare(text, url);
+  }
+}
+
+function fallbackShare(text, url) {
+  // Fallback: copy to clipboard
+  const shareText = `${text}\n${url}`;
+  navigator.clipboard.writeText(shareText).then(() => {
+    showNotification('📋 Link copied to clipboard!');
+  }).catch(() => {
+    // Last resort: show a prompt
+    prompt('Copy this link to share:', url);
+  });
+}
+
+// ==================== SIMILAR MOVIES ====================
+async function loadSimilarMovies(movieId) {
+  const container = document.getElementById('similarMoviesList');
+  if (!container) return;
+  
+  container.innerHTML = '<p class="loading-text">Loading similar movies...</p>';
+  
+  try {
+    const response = await fetch(`${TMDB_BASE_URL}/movie/${movieId}/similar?api_key=${TMDB_API_KEY}&language=en-US&page=1`);
+    const data = await response.json();
+    
+    if (data.results && data.results.length > 0) {
+      const movies = data.results.slice(0, 10).filter(m => m.poster_path);
+      
+      if (movies.length === 0) {
+        container.innerHTML = '<p class="no-similar">No similar movies found</p>';
+        return;
+      }
+      
+      container.innerHTML = movies.map(movie => {
+        const posterUrl = `${TMDB_IMAGE_BASE}${movie.poster_path}`;
+        const rating = movie.vote_average ? movie.vote_average.toFixed(1) : 'N/A';
+        const year = movie.release_date ? movie.release_date.split('-')[0] : '';
+        
+        return `
+          <div class="similar-movie-card" onclick="openSimilarMovie(${movie.id})">
+            <img src="${posterUrl}" alt="${movie.title}" loading="lazy">
+            <div class="similar-movie-info">
+              <h4>${movie.title}</h4>
+              <span>⭐ ${rating} ${year ? '· ' + year : ''}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } else {
+      container.innerHTML = '<p class="no-similar">No similar movies found</p>';
+    }
+  } catch (error) {
+    console.error('Error loading similar movies:', error);
+    container.innerHTML = '<p class="no-similar">Could not load similar movies</p>';
+  }
+}
+
+async function openSimilarMovie(movieId) {
+  try {
+    const response = await fetch(`${TMDB_BASE_URL}/movie/${movieId}?api_key=${TMDB_API_KEY}&language=en-US`);
+    const movie = await response.json();
+    movie.genre_ids = movie.genres ? movie.genres.map(g => g.id) : [];
+    
+    // Close current modal and open new one
+    closeMovieModal();
+    setTimeout(() => openMovieModal(movie), 300);
+  } catch (error) {
+    console.error('Error loading similar movie:', error);
+    showNotification('Error loading movie details');
+  }
+}
+
+// ==================== RECENTLY VIEWED ====================
+function getRecentlyViewed() {
+  return JSON.parse(localStorage.getItem('recentlyViewed')) || [];
+}
+
+function addToRecentlyViewed(movie) {
+  let recent = getRecentlyViewed();
+  
+  // Remove if already exists (to move to front)
+  recent = recent.filter(m => m.id !== movie.id);
+  
+  // Add to beginning
+  recent.unshift({
+    id: movie.id,
+    title: movie.title,
+    poster_path: movie.poster_path,
+    vote_average: movie.vote_average,
+    release_date: movie.release_date,
+    backdrop_path: movie.backdrop_path,
+    overview: movie.overview,
+    genre_ids: movie.genre_ids || []
+  });
+  
+  // Keep only last 20
+  recent = recent.slice(0, 20);
+  
+  localStorage.setItem('recentlyViewed', JSON.stringify(recent));
+  renderRecentlyViewed();
+}
+
+function renderRecentlyViewed() {
+  const section = document.getElementById('recentlyViewedSection');
+  const carousel = document.getElementById('recentlyViewedCarousel');
+  if (!section || !carousel) return;
+  
+  const recent = getRecentlyViewed();
+  
+  // Always show section — with empty state message if needed
+  section.style.display = 'block';
+  
+  if (recent.length === 0) {
+    carousel.innerHTML = `
+      <div class="recently-viewed-empty">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.3;">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+        <p>You haven't viewed any movies yet</p>
+        <span>Open a movie to see it here</span>
+      </div>
+    `;
+    return;
+  }
+  
+  carousel.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  
+  recent.forEach((movie, index) => {
+    const card = document.createElement('div');
+    card.className = 'movie-card';
+    card.dataset.movieId = movie.id;
+    card.onclick = () => openMovieModalFromSearch(movie.id);
+    
+    if (movie.poster_path) {
+      const img = document.createElement('img');
+      img.src = `${TMDB_IMAGE_BASE}${movie.poster_path}`;
+      img.alt = movie.title;
+      img.loading = 'lazy';
+      img.className = 'movie-card-poster';
+      card.appendChild(img);
+    }
+    
+    // Watched badge
+    if (userWatched[movie.id]) {
+      const watchedBadge = document.createElement('div');
+      watchedBadge.className = 'movie-card-watched-badge';
+      watchedBadge.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Watched';
+      card.appendChild(watchedBadge);
+    }
+    
+    const genreNames = movie.genre_ids
+      ? movie.genre_ids.slice(0, 2).map(id => allGenres[id]).filter(Boolean).join(', ')
+      : '';
+    
+    const overlay = document.createElement('div');
+    overlay.className = 'movie-card-overlay';
+    overlay.innerHTML = `
+      <div class="movie-card-info">
+        ${genreNames ? `<div class="movie-card-genres">${genreNames}</div>` : ''}
+        <h4 class="movie-card-title">${movie.title}</h4>
+        <div class="movie-card-rating">⭐ ${movie.vote_average ? movie.vote_average.toFixed(1) : 'N/A'}</div>
+      </div>
+    `;
+    card.appendChild(overlay);
+    
+    card.style.animationDelay = `${Math.min(index, 10) * 0.03}s`;
+    fragment.appendChild(card);
+    requestAnimationFrame(() => card.classList.add('fade-in'));
+  });
+  
+  carousel.appendChild(fragment);
+  
+  // Initialize swipe on this carousel
+  initCarouselSwipe(carousel);
+}
+
+function clearRecentlyViewed() {
+  if (confirm('Clear your recently viewed history?')) {
+    localStorage.removeItem('recentlyViewed');
+    renderRecentlyViewed();
+    showNotification('History cleared');
+  }
+}
+
+// ==================== BOTTOM NAVIGATION ====================
+function navigateToSection(section) {
+  // Update active state
+  document.querySelectorAll('.bottom-nav-item').forEach(item => {
+    item.classList.remove('active');
+  });
+  document.querySelector(`[data-section="${section}"]`).classList.add('active');
+  
+  switch(section) {
+    case 'home':
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      break;
+    case 'search':
+      const searchInput = document.getElementById('searchInput');
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      break;
+    case 'watchlist':
+      openWishlistModal();
+      break;
+    case 'profile':
+      openProfileModal();
+      break;
+  }
+}
+
+function updateBottomNavBadge() {
+  const badge = document.getElementById('bottomNavBadge');
+  if (badge) {
+    if (wishlist.length > 0) {
+      badge.style.display = 'flex';
+      badge.textContent = wishlist.length;
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
+
+// ==================== PULL TO REFRESH ====================
+let pullStartY = 0;
+let pullMoveY = 0;
+let isPulling = false;
+const PULL_THRESHOLD = 80;
+
+function initPullToRefresh() {
+  const mainContent = document.querySelector('.main-content');
+  if (!mainContent) return;
+  
+  document.addEventListener('touchstart', (e) => {
+    if (window.scrollY === 0) {
+      pullStartY = e.touches[0].clientY;
+      isPulling = true;
+    }
+  }, { passive: true });
+  
+  document.addEventListener('touchmove', (e) => {
+    if (!isPulling) return;
+    
+    pullMoveY = e.touches[0].clientY;
+    const pullDistance = pullMoveY - pullStartY;
+    
+    if (pullDistance > 0 && window.scrollY === 0) {
+      const pullIndicator = document.getElementById('pullToRefresh');
+      const progress = Math.min(pullDistance / PULL_THRESHOLD, 1);
+      
+      pullIndicator.style.transform = `translateX(-50%) translateY(${Math.min(pullDistance * 0.5, 60)}px)`;
+      pullIndicator.style.opacity = progress;
+      pullIndicator.querySelector('svg').style.transform = `rotate(${progress * 360}deg)`;
+      
+      if (pullDistance > PULL_THRESHOLD) {
+        pullIndicator.classList.add('ready');
+      } else {
+        pullIndicator.classList.remove('ready');
+      }
+    }
+  }, { passive: true });
+  
+  document.addEventListener('touchend', () => {
+    if (!isPulling) return;
+    
+    const pullDistance = pullMoveY - pullStartY;
+    const pullIndicator = document.getElementById('pullToRefresh');
+    
+    if (pullDistance > PULL_THRESHOLD && window.scrollY === 0) {
+      // Trigger refresh
+      pullIndicator.classList.add('refreshing');
+      pullIndicator.style.transform = 'translateX(-50%) translateY(50px)';
+      
+      showNotification('🔄 Refreshing...');
+      
+      // Reload content
+      Promise.all([
+        loadHeroMovie(),
+        loadMoviesForCarousels()
+      ]).then(() => {
+        pullIndicator.classList.remove('refreshing', 'ready');
+        pullIndicator.style.transform = 'translateX(-50%) translateY(-100%)';
+        pullIndicator.style.opacity = '0';
+        showNotification('✅ Content refreshed!');
+      });
+    } else {
+      pullIndicator.classList.remove('ready');
+      pullIndicator.style.transform = 'translateX(-50%) translateY(-100%)';
+      pullIndicator.style.opacity = '0';
+    }
+    
+    isPulling = false;
+    pullMoveY = 0;
+  }, { passive: true });
+}
+
+// ==================== CAROUSEL SWIPE GESTURES ====================
+function initCarouselSwipe(carousel) {
+  if (!carousel || carousel.dataset.swipeInit) return;
+  carousel.dataset.swipeInit = 'true';
+  
+  let isDown = false;
+  let startX;
+  let scrollLeft;
+  let velocity = 0;
+  let lastX = 0;
+  let lastTime = 0;
+  
+  carousel.addEventListener('touchstart', (e) => {
+    isDown = true;
+    startX = e.touches[0].pageX - carousel.offsetLeft;
+    scrollLeft = carousel.scrollLeft;
+    velocity = 0;
+    lastX = e.touches[0].pageX;
+    lastTime = Date.now();
+    carousel.style.scrollSnapType = 'none';
+    carousel.style.scrollBehavior = 'auto';
+  }, { passive: true });
+  
+  carousel.addEventListener('touchmove', (e) => {
+    if (!isDown) return;
+    const x = e.touches[0].pageX - carousel.offsetLeft;
+    const walk = (x - startX) * 1.5;
+    carousel.scrollLeft = scrollLeft - walk;
+    
+    // Calculate velocity for momentum
+    const now = Date.now();
+    const dt = now - lastTime;
+    if (dt > 0) {
+      velocity = (e.touches[0].pageX - lastX) / dt;
+    }
+    lastX = e.touches[0].pageX;
+    lastTime = now;
+  }, { passive: true });
+  
+  carousel.addEventListener('touchend', () => {
+    isDown = false;
+    carousel.style.scrollSnapType = '';
+    carousel.style.scrollBehavior = '';
+    
+    // Apply momentum
+    if (Math.abs(velocity) > 0.5) {
+      const momentum = velocity * 200;
+      carousel.scrollBy({ left: -momentum, behavior: 'smooth' });
+    }
+  }, { passive: true });
+  
+  // Mouse drag for desktop — only activate after a real drag (>5px)
+  let isDragging = false;
+  let mouseStartX = 0;
+  
+  carousel.addEventListener('mousedown', (e) => {
+    isDown = true;
+    isDragging = false;
+    mouseStartX = e.pageX;
+    startX = e.pageX - carousel.offsetLeft;
+    scrollLeft = carousel.scrollLeft;
+  });
+  
+  carousel.addEventListener('mousemove', (e) => {
+    if (!isDown) return;
+    const movedX = Math.abs(e.pageX - mouseStartX);
+    if (movedX > 5) {
+      isDragging = true;
+      carousel.classList.add('grabbing');
+    }
+    if (!isDragging) return;
+    e.preventDefault();
+    const x = e.pageX - carousel.offsetLeft;
+    const walk = (x - startX) * 1.5;
+    carousel.scrollLeft = scrollLeft - walk;
+  });
+  
+  carousel.addEventListener('mouseup', () => {
+    isDown = false;
+    isDragging = false;
+    carousel.classList.remove('grabbing');
+  });
+  
+  carousel.addEventListener('mouseleave', () => {
+    isDown = false;
+    isDragging = false;
+    carousel.classList.remove('grabbing');
+  });
+}
+
+// Initialize swipe on all carousels
+function initAllCarouselSwipes() {
+  document.querySelectorAll('.carousel').forEach(carousel => {
+    initCarouselSwipe(carousel);
+  });
+}
+
+// ==================== SPLASH SCREEN ====================
+function hideSplashScreen() {
+  const splash = document.getElementById('splashScreen');
+  if (splash) {
+    splash.classList.add('fade-out');
+    setTimeout(() => {
+      splash.style.display = 'none';
+    }, 600);
+  }
+}
+
+// ==================== PWA REGISTRATION ====================
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('✅ Service Worker registered:', reg.scope))
+      .catch(err => console.log('❌ Service Worker registration failed:', err));
+  });
+}
+
+// Handle PWA install prompt
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Could show install button here
+  console.log('📱 App install prompt available');
+});
+
+// ==================== SCROLL-AWARE HEADER ====================
+let lastScrollY = 0;
+function initScrollHeader() {
+  window.addEventListener('scroll', () => {
+    const header = document.querySelector('.header');
+    const bottomNav = document.getElementById('bottomNav');
+    const currentScrollY = window.scrollY;
+    
+    if (currentScrollY > lastScrollY && currentScrollY > 100) {
+      // Scrolling down - hide header, show bottom nav
+      header.classList.add('header-hidden');
+    } else {
+      // Scrolling up - show header
+      header.classList.remove('header-hidden');
+    }
+    
+    lastScrollY = currentScrollY;
+  }, { passive: true });
+}
+
+// ==================== BACK TO TOP BUTTON ====================
+function initBackToTop() {
+  const btn = document.createElement('button');
+  btn.className = 'back-to-top';
+  btn.id = 'backToTop';
+  btn.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>`;
+  btn.onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+  document.body.appendChild(btn);
+  
+  window.addEventListener('scroll', () => {
+    if (window.scrollY > 800) {
+      btn.classList.add('visible');
+    } else {
+      btn.classList.remove('visible');
+    }
+  }, { passive: true });
+}
+
+// ==================== DOUBLE TAP TO LIKE ====================
+function initDoubleTapLike() {
+  let lastTapTime = 0;
+  let lastTapTarget = null;
+  
+  document.addEventListener('touchend', (e) => {
+    const movieCard = e.target.closest('.movie-card');
+    if (!movieCard) return;
+    
+    const currentTime = Date.now();
+    const tapLength = currentTime - lastTapTime;
+    
+    if (tapLength < 300 && tapLength > 0 && lastTapTarget === movieCard) {
+      // Double tap detected!
+      e.preventDefault();
+      
+      // Get movie ID from onclick
+      const onclickAttr = movieCard.getAttribute('onclick');
+      if (onclickAttr) {
+        const match = onclickAttr.match(/openMovieModal(?:FromSearch)?\((\d+)\)/);
+        if (match) {
+          const movieId = parseInt(match[1]);
+          // Show heart animation
+          showHeartAnimation(movieCard);
+          // Add to watchlist if not already there
+          if (!isInWishlist(movieId)) {
+            // We need to construct basic movie data
+            const titleEl = movieCard.querySelector('.movie-title');
+            const posterEl = movieCard.querySelector('.movie-poster img');
+            if (titleEl) {
+              const movieData = { id: movieId, title: titleEl.textContent, poster_path: '' };
+              wishlist.push(movieData);
+              localStorage.setItem('movieWishlist', JSON.stringify(wishlist));
+              updateWishlistCount();
+              updateBottomNavBadge();
+              syncWatchlistToServer(movieData, 'add');
+              showNotification('❤️ Added to Watchlist!');
+            }
+          }
+        }
+      }
+    }
+    
+    lastTapTime = currentTime;
+    lastTapTarget = movieCard;
+  });
+}
+
+function showHeartAnimation(element) {
+  const heart = document.createElement('div');
+  heart.className = 'heart-animation';
+  heart.innerHTML = '❤️';
+  
+  const rect = element.getBoundingClientRect();
+  heart.style.left = rect.left + rect.width / 2 - 30 + 'px';
+  heart.style.top = rect.top + rect.height / 2 - 30 + 'px';
+  
+  document.body.appendChild(heart);
+  
+  setTimeout(() => heart.remove(), 1000);
+}
+
+// Enhanced initialization is built into initializeApp above
+
+// Also update wishlist count on changes
+const originalUpdateWishlistCount = updateWishlistCount;
+const _origUpdateWC = window.updateWishlistCount || updateWishlistCount;
+// Patch updateWishlistCount to also update bottom nav
+(function() {
+  const orig = updateWishlistCount;
+  window.updateWishlistCount = function() {
+    orig();
+    updateBottomNavBadge();
+  };
+})();

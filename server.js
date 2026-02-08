@@ -11,6 +11,9 @@ const PORT = 8080;
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Serve PWA files from /public
+app.use(express.static(path.join(__dirname, 'public')));
+
 // Serve static files from /main
 app.use(express.static(path.join(__dirname, 'main')));
 

@@ -5,9 +5,50 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MovieHub - Discover Movies</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M 30 20 A 25 25 0 0 1 70 20' stroke='%235B8DBE' stroke-width='8' stroke-linecap='round' fill='none'/%3E%3Crect x='25' y='40' width='50' height='35' rx='3' fill='%237B9DC4'/%3E%3Cpolygon points='42,50 42,68 58,59' fill='%232C3E73'/%3E%3Ccircle cx='75' cy='75' r='12' stroke='%232C3E73' stroke-width='5' fill='none'/%3E%3Cline x1='84' y1='84' x2='93' y2='93' stroke='%232C3E73' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E">
+  <!-- PWA Support -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#5B8DBE">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MovieHub">
+  <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="application-name" content="MovieHub">
+  <meta name="msapplication-TileColor" content="#1a1a2e">
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
+  <!-- Splash Screen -->
+  <div class="splash-screen" id="splashScreen">
+    <div class="splash-content">
+      <div class="splash-logo">
+        <svg class="splash-logo-svg" width="120" height="120" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 30 20 A 25 25 0 0 1 70 20" stroke="#5B8DBE" stroke-width="8" stroke-linecap="round" fill="none"/>
+          <rect x="25" y="40" width="50" height="35" rx="3" fill="#7B9DC4"/>
+          <polygon points="42,50 42,68 58,59" fill="#2C3E73"/>
+          <circle cx="75" cy="75" r="12" stroke="#2C3E73" stroke-width="5" fill="none"/>
+          <line x1="84" y1="84" x2="93" y2="93" stroke="#2C3E73" stroke-width="6" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h1 class="splash-title">MovieHub</h1>
+      <p class="splash-subtitle">Discover your next favorite movie</p>
+      <div class="splash-loader">
+        <div class="splash-loader-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pull to Refresh Indicator -->
+  <div class="pull-to-refresh" id="pullToRefresh">
+    <div class="pull-to-refresh-spinner">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="23 4 23 10 17 10"></polyline>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+      </svg>
+    </div>
+    <span>Release to refresh</span>
+  </div>
+
   <!-- Auth Screen - Login/Register -->
   <div class="auth-screen" id="authScreen">
     <div class="auth-background">
@@ -210,6 +251,12 @@
       </div>
       <div class="search-bar">
         <input type="text" id="searchInput" placeholder="Search movies...">
+        <button class="search-clear-btn" id="searchClearBtn" type="button" aria-label="Clear search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
         <button class="search-icon" id="searchButton">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8"></circle>
@@ -352,6 +399,23 @@
       </div>
     </div>
     
+    <!-- Recently Viewed -->
+    <section class="recently-viewed-wrapper" id="recentlyViewedSection">
+      <div class="section-header">
+        <h2 class="section-title">Recently Viewed</h2>
+        <button class="clear-history-btn" onclick="clearRecentlyViewed()" title="Clear history">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+          Clear
+        </button>
+      </div>
+      <div class="carousel" id="recentlyViewedCarousel">
+        <!-- Dynamically populated -->
+      </div>
+    </section>
+
     <!-- Recommended for You -->
     <section class="carousel-section">
       <div class="section-header">
@@ -1173,6 +1237,38 @@
       </div>
     </div>
   </div>
+
+  <!-- Bottom Navigation Bar (Mobile App) -->
+  <nav class="bottom-nav" id="bottomNav">
+    <button class="bottom-nav-item active" onclick="navigateToSection('home')" data-section="home">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+      </svg>
+      <span>Home</span>
+    </button>
+    <button class="bottom-nav-item" onclick="navigateToSection('search')" data-section="search">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"></circle>
+        <path d="m21 21-4.35-4.35"></path>
+      </svg>
+      <span>Search</span>
+    </button>
+    <button class="bottom-nav-item" onclick="navigateToSection('watchlist')" data-section="watchlist">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+      </svg>
+      <span>Watchlist</span>
+      <span class="bottom-nav-badge" id="bottomNavBadge" style="display:none;">0</span>
+    </button>
+    <button class="bottom-nav-item" onclick="navigateToSection('profile')" data-section="profile">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+      </svg>
+      <span>Profile</span>
+    </button>
+  </nav>
 
   <script src="script.js"></script>
 </body>

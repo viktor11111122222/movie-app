@@ -411,6 +411,26 @@ function getVideoQualityParam() {
 // Wishlist
 let wishlist = JSON.parse(localStorage.getItem('movieWishlist')) || [];
 
+// Sanitize wishlist data - remove any invalid entries
+if (Array.isArray(wishlist)) {
+  wishlist = wishlist.filter(item => 
+    item && 
+    typeof item === 'object' && 
+    item.id && 
+    typeof item.id === 'number' && 
+    item.title && 
+    typeof item.title === 'string'
+  );
+  // Save cleaned data back
+  localStorage.setItem('movieWishlist', JSON.stringify(wishlist));
+} else {
+  // Reset if corrupted
+  wishlist = [];
+  localStorage.setItem('movieWishlist', JSON.stringify(wishlist));
+}
+
+console.log('🎬 Wishlist initialized:', wishlist.length, 'items:', wishlist.map(m => m.title));
+
 // User movie status caches (rating & watched)
 let userRatings = {};   // movieId -> rating (0.5-10)
 let userWatched = {};   // movieId -> true/false
@@ -1071,7 +1091,13 @@ async function initializeApp() {
   detectUserRegion();
   loadGenres();
   loadHeroMovie();
-  updateWishlistCount();
+  
+  // Ensure DOM is ready before updating wishlist count
+  setTimeout(() => {
+    updateWishlistCount();
+    console.log('⏰ DOM ready - wishlist count updated');
+  }, 100);
+  
   loadMoviesForCarousels();
   await loadUserMovieData();
   loadProfile();
@@ -1164,11 +1190,39 @@ function closeWishlistModal() {
   console.log('✕ Wishlist closed');
 }
 
+function clearWishlistData() {
+  console.log('🧹 Clearing wishlist data...');
+  wishlist = [];
+  localStorage.setItem('movieWishlist', JSON.stringify(wishlist));
+  updateWishlistCount();
+  console.log('✅ Wishlist cleared and count updated');
+}
+
+// Debug function - call from console if needed
+window.clearWishlistData = clearWishlistData;
+window.debugWishlist = () => {
+  console.log('🔍 Debug wishlist:', wishlist);
+  console.log('🔍 localStorage wishlist:', localStorage.getItem('movieWishlist'));
+  const countElement = document.getElementById('wishlistCount');
+  console.log('🔍 Count element:', countElement, countElement?.style.display, countElement?.textContent);
+};
+window.forceUpdateCount = () => {
+  console.log('🔧 Force updating wishlist count...');
+  updateWishlistCount();
+};
+
 function updateWishlistCount() {
   const countElement = document.getElementById('wishlistCount');
+  console.log('🔄 Updating wishlist count:', wishlist.length);
   if (countElement) {
     countElement.textContent = wishlist.length;
-    countElement.style.display = wishlist.length > 0 ? 'flex' : 'none';
+    if (wishlist.length > 0) {
+      countElement.style.setProperty('display', 'flex', 'important');
+      console.log('✅ Showing count:', wishlist.length);
+    } else {
+      countElement.style.setProperty('display', 'none', 'important');
+      console.log('❌ Hiding count (0 items)');
+    }
   }
 }
 
@@ -1189,7 +1243,7 @@ function renderWishlistItems() {
   }
   
   container.innerHTML = wishlist.map(movie => `
-    <div class="wishlist-item" data-movie-id="${movie.id}">
+    <div class="wishlist-item" data-movie-id="${movie.id}" onclick="openMovieFromWishlist(${movie.id}, event)">
       <div class="wishlist-item-poster">
         ${movie.poster_path ? 
           `<img src="${TMDB_IMAGE_BASE}${movie.poster_path}" alt="${movie.title}">` : 
@@ -1203,7 +1257,7 @@ function renderWishlistItems() {
           ${movie.release_date ? `<span class="year">${movie.release_date.split('-')[0]}</span>` : ''}
         </div>
       </div>
-      <button class="wishlist-item-remove" onclick="removeFromWishlist(${movie.id})" title="Remove from watchlist">
+      <button class="wishlist-item-remove" onclick="removeFromWishlist(${movie.id}, event)" title="Remove from watchlist">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1213,7 +1267,12 @@ function renderWishlistItems() {
   `).join('');
 }
 
-function removeFromWishlist(movieId) {
+function removeFromWishlist(movieId, event) {
+  // Prevent opening movie modal when clicking remove button
+  if (event) {
+    event.stopPropagation();
+  }
+  
   wishlist = wishlist.filter(m => m.id !== movieId);
   localStorage.setItem('movieWishlist', JSON.stringify(wishlist));
   syncWatchlistToServer({ id: movieId }, 'remove');
@@ -1221,6 +1280,31 @@ function removeFromWishlist(movieId) {
   updateWishlistCount();
   showNotification('Removed from watchlist');
   console.log('➖ Movie removed from wishlist');
+}
+
+// Open movie modal from wishlist
+async function openMovieFromWishlist(movieId, event) {
+  // Prevent clicking on child elements from triggering this
+  if (event && event.target.closest('.wishlist-item-remove')) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(`${TMDB_BASE_URL}/movie/${movieId}?api_key=${TMDB_API_KEY}&language=en-US`);
+    const movie = await response.json();
+    
+    // Get genres
+    movie.genre_ids = movie.genres ? movie.genres.map(g => g.id) : [];
+    
+    // Close wishlist modal before opening movie modal
+    closeWishlistModal();
+    
+    // Open movie modal
+    openMovieModal(movie);
+  } catch (error) {
+    console.error('❌ Error loading movie from wishlist:', error);
+    showNotification('Error loading movie details');
+  }
 }
 
 // Zatvori wishlist modal sa ESC tastom
@@ -3719,35 +3803,165 @@ async function shareMovie() {
   const title = movie.title;
   const year = movie.release_date ? movie.release_date.split('-')[0] : '';
   const rating = movie.vote_average ? movie.vote_average.toFixed(1) : 'N/A';
-  const text = `🎬 Check out "${title}" (${year}) - ⭐ ${rating}/10\n\nDiscovered on MovieHub`;
-  const url = `https://www.themoviedb.org/movie/${movie.id}`;
+  
+  // Create shareable text
+  const shareTitle = `${title} (${year})`;
+  const shareText = `🎬 Check out "${title}" ${year ? `(${year})` : ''} - ⭐ ${rating}/10`;
+  const tmdbUrl = `https://www.themoviedb.org/movie/${movie.id}`;
   
   // Try native Web Share API first (works great on mobile / iOS / Android)
   if (navigator.share) {
     try {
-      await navigator.share({ title: `${title} (${year})`, text, url });
-      showNotification('Shared successfully!');
+      await navigator.share({ 
+        title: shareTitle,
+        text: shareText,
+        url: tmdbUrl
+      });
+      showNotification('✅ Shared successfully!');
+      return;
     } catch (err) {
-      if (err.name !== 'AbortError') {
-        console.error('Share failed:', err);
-        fallbackShare(text, url);
+      if (err.name === 'AbortError') {
+        // User cancelled, do nothing
+        return;
       }
+      console.error('Share failed:', err);
+      // Fall through to fallback
     }
-  } else {
-    fallbackShare(text, url);
+  }
+  
+  // Fallback: Show share modal
+  showShareModal(movie, shareText, tmdbUrl);
+}
+
+function showShareModal(movie, shareText, url) {
+  const title = movie.title;
+  const year = movie.release_date ? movie.release_date.split('-')[0] : '';
+  
+  // Encode for URLs
+  const encodedText = encodeURIComponent(shareText);
+  const encodedUrl = encodeURIComponent(url);
+  const encodedTitle = encodeURIComponent(`${title} ${year ? `(${year})` : ''}`);
+  
+  // Create share modal
+  const modalHTML = `
+    <div class="share-modal-overlay" id="shareModalOverlay" onclick="closeShareModal()">
+      <div class="share-modal-content" onclick="event.stopPropagation()">
+        <div class="share-modal-header">
+          <h3>Share "${title}"</h3>
+          <button class="share-modal-close" onclick="closeShareModal()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        
+        <div class="share-modal-body">
+          <div class="share-buttons">
+            <button class="share-btn copy-btn" onclick="copyMovieLink('${url}', '${shareText.replace(/'/g, "\\'")}')">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span>Copy Link</span>
+            </button>
+            
+            <a class="share-btn twitter-btn" href="https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}" target="_blank" rel="noopener">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+              </svg>
+              <span>Twitter</span>
+            </a>
+            
+            <a class="share-btn facebook-btn" href="https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}" target="_blank" rel="noopener">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+              </svg>
+              <span>Facebook</span>
+            </a>
+            
+            <a class="share-btn whatsapp-btn" href="https://wa.me/?text=${encodedText}%20${encodedUrl}" target="_blank" rel="noopener">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
+              </svg>
+              <span>WhatsApp</span>
+            </a>
+            
+            <a class="share-btn telegram-btn" href="https://t.me/share/url?url=${encodedUrl}&text=${encodedText}" target="_blank" rel="noopener">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295-.002 0-.003 0-.005 0l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.658-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/>
+              </svg>
+              <span>Telegram</span>
+            </a>
+            
+            <button class="share-btn email-btn" onclick="shareViaEmail('${encodedTitle}', '${encodedText}', '${encodedUrl}')">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                <polyline points="22,6 12,13 2,6"></polyline>
+              </svg>
+              <span>Email</span>
+            </button>
+          </div>
+          
+          <div class="share-link-container">
+            <input type="text" class="share-link-input" value="${url}" readonly id="shareLinkInput">
+            <button class="share-copy-btn" onclick="copyMovieLink('${url}', '${shareText.replace(/'/g, "\\'")}')">Copy</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Remove existing modal if any
+  const existing = document.getElementById('shareModalOverlay');
+  if (existing) existing.remove();
+  
+  // Add to body
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+  
+  // Animate in
+  setTimeout(() => {
+    document.getElementById('shareModalOverlay').classList.add('active');
+  }, 10);
+}
+
+function closeShareModal() {
+  const modal = document.getElementById('shareModalOverlay');
+  if (modal) {
+    modal.classList.remove('active');
+    setTimeout(() => modal.remove(), 300);
   }
 }
 
-function fallbackShare(text, url) {
-  // Fallback: copy to clipboard
-  const shareText = `${text}\n${url}`;
-  navigator.clipboard.writeText(shareText).then(() => {
+function copyMovieLink(url, text) {
+  const fullText = `${text}\n${url}`;
+  navigator.clipboard.writeText(fullText).then(() => {
     showNotification('📋 Link copied to clipboard!');
+    closeShareModal();
   }).catch(() => {
-    // Last resort: show a prompt
-    prompt('Copy this link to share:', url);
+    // Fallback: select input
+    const input = document.getElementById('shareLinkInput');
+    if (input) {
+      input.select();
+      document.execCommand('copy');
+      showNotification('📋 Link copied!');
+      closeShareModal();
+    }
   });
 }
+
+function shareViaEmail(title, text, url) {
+  const subject = encodeURIComponent(`Check out this movie: ${decodeURIComponent(title)}`);
+  const body = encodeURIComponent(`${decodeURIComponent(text)}\n\n${decodeURIComponent(url)}`);
+  window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+}
+
+// Close share modal with ESC
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeShareModal();
+  }
+});
 
 // ==================== SIMILAR MOVIES ====================
 async function loadSimilarMovies(movieId) {
@@ -4262,14 +4476,30 @@ function showHeartAnimation(element) {
 
 // Enhanced initialization is built into initializeApp above
 
-// Also update wishlist count on changes
-const originalUpdateWishlistCount = updateWishlistCount;
-const _origUpdateWC = window.updateWishlistCount || updateWishlistCount;
+// Update bottom nav badge function
+function updateBottomNavBadge() {
+  const bottomWishlistBtn = document.querySelector('.bottom-nav-item[onclick="openWishlistModal()"]');
+  if (bottomWishlistBtn) {
+    const badge = bottomWishlistBtn.querySelector('.bottom-nav-badge');
+    if (wishlist.length > 0) {
+      if (!badge) {
+        const newBadge = document.createElement('span');
+        newBadge.className = 'bottom-nav-badge';
+        newBadge.textContent = wishlist.length;
+        bottomWishlistBtn.appendChild(newBadge);
+      } else {
+        badge.textContent = wishlist.length;
+      }
+    } else {
+      if (badge) badge.remove();
+    }
+  }
+}
+
 // Patch updateWishlistCount to also update bottom nav
-(function() {
-  const orig = updateWishlistCount;
-  window.updateWishlistCount = function() {
-    orig();
-    updateBottomNavBadge();
-  };
-})();
+const originalUpdateWishlistCount = updateWishlistCount;
+window.updateWishlistCount = function() {
+  console.log('🔄 Patched updateWishlistCount called');
+  originalUpdateWishlistCount();
+  updateBottomNavBadge();
+};

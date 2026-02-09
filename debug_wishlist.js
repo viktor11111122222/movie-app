@@ -1,0 +1,1 @@
+console.log('🔧 Debugging wishlist count element:'); const el = document.getElementById('wishlistCount'); console.log('Element:', el); console.log('Computed style:', getComputedStyle(el).display); console.log('Inline style:', el.style.display); console.log('Text content:', el.textContent); debugWishlist();

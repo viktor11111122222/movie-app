@@ -1037,11 +1037,13 @@ input:checked + .toggle-slider:before {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s ease;
+  /* transition: background 0.2s ease; */
+  transition: background-color 0.2s ease, transform 0.2s ease;
+
 }
 
 .profile-modal-close:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: red;
 }
 
 .profile-modal-body {
@@ -1655,6 +1657,7 @@ input:checked + .toggle-slider:before {
 
 .wishlist-close,
 .search-modal-close {
+  /* background-color: red; */
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
   color: white;
@@ -1672,8 +1675,9 @@ input:checked + .toggle-slider:before {
 
 .wishlist-close:hover,
 .search-modal-close:hover {
-  background: rgba(255, 255, 255, 0.2);
+  /* background: rgba(255, 255, 255, 0.2); */
   transform: rotate(90deg);
+  background: red;
 }
 
 .wishlist-items,

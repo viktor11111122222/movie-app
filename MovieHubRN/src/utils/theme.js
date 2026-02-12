@@ -1,38 +1,80 @@
-export const COLORS = {
+export const colors = {
   primary: '#E50914',
-  background: '#0a0a0a',
-  card: '#1a1a1a',
-  text: '#ffffff',
-  textSecondary: 'rgba(255, 255, 255, 0.7)',
-  textMuted: 'rgba(255, 255, 255, 0.5)',
-  border: 'rgba(255, 255, 255, 0.1)',
-  gold: '#FFD700',
+  primaryDark: '#B20710',
+  secondary: '#B20710',
+  background: '#141414',
+  surface: '#1F1F1F',
+  cardBackground: '#1F1F1F',
+  text: '#FFFFFF',
+  textPrimary: '#FFFFFF',
+  textSecondary: '#B3B3B3',
+  accent: '#FFD700',
+  error: '#FF0000',
   success: '#4CAF50',
-  error: '#f44336',
+  warning: '#FFC107',
+  black: '#000000',
+  white: '#FFFFFF',
+  gray: '#808080',
+  darkGray: '#2A2A2A',
+  lightGray: '#E0E0E0',
+  border: '#2A2A2A',
 };
 
-export const SPACING = {
+export const fonts = {
+  regular: 'System',
+  bold: 'System',
+  light: 'System',
+  sizes: {
+    xs: 10,
+    sm: 12,
+    md: 14,
+    lg: 16,
+    xl: 18,
+    xxl: 20,
+    xxxl: 24,
+    huge: 32,
+  },
+};
+
+export const spacing = {
   xs: 4,
-  sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
-};
-
-export const FONT_SIZES = {
-  xs: 12,
-  sm: 14,
-  md: 16,
-  lg: 18,
-  xl: 20,
-  xxl: 24,
-  xxxl: 32,
-};
-
-export const BORDER_RADIUS = {
   sm: 8,
   md: 12,
   lg: 16,
   xl: 20,
-  round: 999,
+  xxl: 24,
+  xxxl: 32,
+  huge: 48,
+};
+
+export const borderRadius = {
+  sm: 4,
+  md: 8,
+  lg: 12,
+  xl: 16,
+  round: 50,
+};
+
+export const shadows = {
+  small: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 2,
+  },
+  medium: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.30,
+    shadowRadius: 4.65,
+    elevation: 4,
+  },
+  large: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.37,
+    shadowRadius: 7.49,
+    elevation: 8,
+  },
 };

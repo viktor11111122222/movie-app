@@ -1,139 +1,155 @@
-import React, {useState, useEffect} from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Dimensions,
-  TouchableOpacity,
-} from 'react-native';
-import FastImage from 'react-native-fast-image';
-import LinearGradient from 'react-native-linear-gradient';
+import React from 'react';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import {LinearGradient} from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
-import {tmdbService} from '../services/tmdb';
+import { colors, spacing, fonts } from '../utils/theme';
+import { getImageUrl, truncateText } from '../utils/helpers';
 
-const {width, height} = Dimensions.get('window');
-const HERO_HEIGHT = height * 0.6;
+const { width } = Dimensions.get('window');
 
-const HeroSection = ({movie, onPress}) => {
+const HeroSection = ({ movie, onPress, onPlayTrailer }) => {
   if (!movie) return null;
 
   return (
-    <TouchableOpacity
-      style={styles.container}
-      onPress={() => onPress(movie)}
-      activeOpacity={0.9}>
-      <FastImage
-        source={{
-          uri: tmdbService.getBackdropUrl(movie.backdrop_path),
-          priority: FastImage.priority.high,
-        }}
-        style={styles.image}
-        resizeMode={FastImage.resizeMode.cover}
+    <TouchableOpacity style={styles.container} onPress={() => onPress(movie)} activeOpacity={0.9}>
+      <Image
+        source={{ uri: getImageUrl(movie.backdrop_path || movie.poster_path, 'original') }}
+        style={styles.backgroundImage}
+        resizeMode="cover"
       />
-
+      
       <LinearGradient
-        colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.9)', '#0a0a0a']}
+        colors={['transparent', 'rgba(20, 20, 20, 0.7)', colors.background]}
         style={styles.gradient}
-      />
-
-      <View style={styles.content}>
-        <Text style={styles.title}>{movie.title}</Text>
-        <View style={styles.meta}>
-          <View style={styles.rating}>
-            <Icon name="star" size={18} color="#FFD700" />
-            <Text style={styles.ratingText}>{movie.vote_average?.toFixed(1)}</Text>
+      >
+        <View style={styles.content}>
+          <Text style={styles.title}>{movie.title}</Text>
+          
+          <View style={styles.metadata}>
+            <View style={styles.ratingContainer}>
+              <Icon name="star" size={16} color={colors.accent} />
+              <Text style={styles.rating}>{movie.vote_average?.toFixed(1)}</Text>
+            </View>
+            
+            <Text style={styles.year}>
+              {movie.release_date ? new Date(movie.release_date).getFullYear() : 'N/A'}
+            </Text>
           </View>
-          <Text style={styles.year}>
-            {movie.release_date?.substring(0, 4)}
+          
+          <Text style={styles.overview} numberOfLines={3}>
+            {truncateText(movie.overview, 150)}
           </Text>
+          
+          <View style={styles.buttons}>
+            <TouchableOpacity 
+              style={styles.playButton} 
+              onPress={() => onPlayTrailer && onPlayTrailer(movie)}
+            >
+              <Icon name="play" size={20} color={colors.white} />
+              <Text style={styles.playButtonText}>Watch Trailer</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.infoButton} 
+              onPress={() => onPress(movie)}
+            >
+              <Icon name="information-circle-outline" size={20} color={colors.white} />
+              <Text style={styles.infoButtonText}>More Info</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        <Text style={styles.overview} numberOfLines={3}>
-          {movie.overview}
-        </Text>
-
-        <View style={styles.buttons}>
-          <TouchableOpacity
-            style={styles.playButton}
-            onPress={() => onPress(movie)}>
-            <Icon name="play" size={20} color="#fff" />
-            <Text style={styles.playButtonText}>Watch Now</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      </LinearGradient>
     </TouchableOpacity>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    height: HERO_HEIGHT,
     width: width,
-    marginBottom: 20,
+    height: 500,
+    position: 'relative',
   },
-  image: {
+  backgroundImage: {
     width: '100%',
     height: '100%',
-    position: 'absolute',
   },
   gradient: {
     position: 'absolute',
-    width: '100%',
-    height: '100%',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '70%',
+    justifyContent: 'flex-end',
   },
   content: {
-    position: 'absolute',
-    bottom: 30,
-    left: 16,
-    right: 16,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
   },
   title: {
-    color: '#fff',
-    fontSize: 32,
-    fontWeight: '700',
-    marginBottom: 8,
+    fontSize: fonts.sizes.huge,
+    fontWeight: 'bold',
+    color: colors.white,
+    marginBottom: spacing.sm,
   },
-  meta: {
+  metadata: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: spacing.md,
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: spacing.md,
   },
   rating: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 15,
-  },
-  ratingText: {
-    color: '#FFD700',
-    fontSize: 16,
-    fontWeight: '600',
+    color: colors.white,
+    fontSize: fonts.sizes.md,
+    fontWeight: 'bold',
     marginLeft: 4,
   },
   year: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 16,
+    color: colors.textSecondary,
+    fontSize: fonts.sizes.md,
   },
   overview: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 14,
+    color: colors.textSecondary,
+    fontSize: fonts.sizes.md,
     lineHeight: 20,
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
   buttons: {
     flexDirection: 'row',
+    gap: spacing.md,
   },
   playButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E50914',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md,
     borderRadius: 8,
   },
   playButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
+    color: colors.white,
+    fontSize: fonts.sizes.md,
+    fontWeight: 'bold',
+    marginLeft: spacing.sm,
+  },
+  infoButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingVertical: spacing.md,
+    borderRadius: 8,
+  },
+  infoButtonText: {
+    color: colors.white,
+    fontSize: fonts.sizes.md,
+    fontWeight: 'bold',
+    marginLeft: spacing.sm,
   },
 });
 

@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,95 +9,178 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import {tmdbService} from '../services/tmdb';
+import { colors, spacing, fonts, borderRadius } from '../utils/theme';
+import tmdbService from '../services/tmdb';
 import MovieCard from '../components/MovieCard';
+import GenreFilter from '../components/GenreFilter';
+import { debounce } from '../utils/helpers';
+import { addToRecentlyViewed } from '../components/RecentlyViewed';
 
-const SearchScreen = ({navigation}) => {
+const SearchScreen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [movies, setMovies] = useState([]);
+  const [genres, setGenres] = useState([]);
+  const [selectedGenre, setSelectedGenre] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
-    if (searchQuery.length > 2) {
-      const timer = setTimeout(() => {
-        handleSearch();
-      }, 500);
-      return () => clearTimeout(timer);
-    } else {
-      setResults([]);
-      setHasSearched(false);
-    }
-  }, [searchQuery]);
+    loadGenres();
+  }, []);
 
-  const handleSearch = async () => {
+  useEffect(() => {
+    if (selectedGenre) {
+      loadMoviesByGenre();
+    }
+  }, [selectedGenre]);
+
+  const loadGenres = async () => {
     try {
-      setIsLoading(true);
-      setHasSearched(true);
-      const data = await tmdbService.searchMovies(searchQuery);
-      setResults(data.results);
+      const data = await tmdbService.getGenres();
+      setGenres(data.genres);
     } catch (error) {
-      console.error('Search error:', error);
-    } finally {
-      setIsLoading(false);
+      console.error('Error loading genres:', error);
     }
   };
 
-  const handleMoviePress = movie => {
-    navigation.navigate('MovieDetails', {movieId: movie.id});
+  const loadMoviesByGenre = async () => {
+    try {
+      setLoading(true);
+      const data = await tmdbService.getMoviesByGenre(selectedGenre, 1);
+      setMovies(data.results);
+      setPage(1);
+    } catch (error) {
+      console.error('Error loading movies by genre:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const searchMovies = async (query) => {
+    if (!query.trim()) {
+      setMovies([]);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const data = await tmdbService.searchMovies(query, 1);
+      setMovies(data.results);
+      setPage(1);
+      setSelectedGenre(null);
+    } catch (error) {
+      console.error('Error searching movies:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const searchRef = useRef(searchMovies);
+  searchRef.current = searchMovies;
+
+  const debouncedSearch = useMemo(
+    () => debounce((...args) => searchRef.current(...args), 500),
+    [],
+  );
+
+  const handleSearchChange = (text) => {
+    setSearchQuery(text);
+    debouncedSearch(text);
+  };
+
+  const handleGenreSelect = (genreId) => {
+    setSelectedGenre(genreId);
+    setSearchQuery('');
+    if (genreId === null) {
+      setMovies([]);
+    }
+  };
+
+  const handleMoviePress = (movie) => {
+    addToRecentlyViewed(movie);
+    navigation.navigate('MovieDetails', { movieId: movie.id });
+  };
+
+  const loadMore = async () => {
+    if (loading) return;
+
+    try {
+      setLoading(true);
+      const nextPage = page + 1;
+      let data;
+
+      if (searchQuery) {
+        data = await tmdbService.searchMovies(searchQuery, nextPage);
+      } else if (selectedGenre) {
+        data = await tmdbService.getMoviesByGenre(selectedGenre, nextPage);
+      }
+
+      if (data) {
+        setMovies(prev => [...prev, ...data.results]);
+        setPage(nextPage);
+      }
+    } catch (error) {
+      console.error('Error loading more movies:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <View style={styles.container}>
-      <View style={styles.searchBar}>
-        <Icon name="search" size={20} color="rgba(255,255,255,0.6)" />
+      <View style={styles.searchContainer}>
+        <Icon name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
         <TextInput
-          style={styles.input}
+          style={styles.searchInput}
           placeholder="Search movies..."
-          placeholderTextColor="rgba(255,255,255,0.5)"
+          placeholderTextColor={colors.textSecondary}
           value={searchQuery}
-          onChangeText={setSearchQuery}
-          autoFocus
+          onChangeText={handleSearchChange}
+          autoCapitalize="none"
         />
         {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <Icon name="close-circle" size={20} color="rgba(255,255,255,0.6)" />
+          <TouchableOpacity onPress={() => handleSearchChange('')}>
+            <Icon name="close-circle" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
         )}
       </View>
 
-      {isLoading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#E50914" />
+      <GenreFilter
+        genres={genres}
+        selectedGenre={selectedGenre}
+        onSelectGenre={handleGenreSelect}
+      />
+
+      {loading && movies.length === 0 ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
-      ) : results.length > 0 ? (
-        <FlatList
-          data={results}
-          numColumns={2}
-          keyExtractor={item => item.id.toString()}
-          renderItem={({item}) => (
-            <View style={styles.cardWrapper}>
-              <MovieCard movie={item} onPress={handleMoviePress} />
-            </View>
-          )}
-          contentContainerStyle={styles.list}
-        />
-      ) : hasSearched ? (
-        <View style={styles.centerContainer}>
-          <Icon name="film-outline" size={80} color="rgba(255,255,255,0.3)" />
-          <Text style={styles.emptyTitle}>No results found</Text>
+      ) : movies.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Icon name="film-outline" size={64} color={colors.textSecondary} />
           <Text style={styles.emptyText}>
-            Try searching with different keywords
+            {searchQuery || selectedGenre ? 'No movies found' : 'Search for movies or select a genre'}
           </Text>
         </View>
       ) : (
-        <View style={styles.centerContainer}>
-          <Icon name="search-outline" size={80} color="rgba(255,255,255,0.3)" />
-          <Text style={styles.emptyTitle}>Search for movies</Text>
-          <Text style={styles.emptyText}>
-            Enter at least 3 characters to start searching
-          </Text>
-        </View>
+        <FlatList
+          data={movies}
+          keyExtractor={(item) => item.id.toString()}
+          numColumns={2}
+          contentContainerStyle={styles.gridContent}
+          renderItem={({ item }) => (
+            <View style={styles.movieItem}>
+              <MovieCard movie={item} onPress={handleMoviePress} />
+            </View>
+          )}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loading && movies.length > 0 ? (
+              <ActivityIndicator size="small" color={colors.primary} style={styles.footerLoader} />
+            ) : null
+          }
+        />
       )}
     </View>
   );
@@ -106,49 +189,54 @@ const SearchScreen = ({navigation}) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: colors.background,
   },
-  searchBar: {
+  searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    margin: 16,
-    marginTop: 60,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    backgroundColor: colors.surface,
+    margin: spacing.lg,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: colors.darkGray,
   },
-  input: {
+  searchIcon: {
+    marginRight: spacing.sm,
+  },
+  searchInput: {
     flex: 1,
-    color: '#fff',
-    fontSize: 16,
-    paddingVertical: 12,
-    marginLeft: 10,
+    color: colors.text,
+    fontSize: fonts.sizes.md,
+    paddingVertical: spacing.md,
   },
-  list: {
-    padding: 16,
+  gridContent: {
+    padding: spacing.md,
   },
-  cardWrapper: {
+  movieItem: {
     flex: 1,
+    margin: spacing.sm,
+    alignItems: 'center',
   },
-  centerContainer: {
+  loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 32,
   },
-  emptyTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    marginTop: 16,
-    marginBottom: 8,
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
   },
   emptyText: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 14,
+    color: colors.textSecondary,
+    fontSize: fonts.sizes.lg,
     textAlign: 'center',
+    marginTop: spacing.lg,
+  },
+  footerLoader: {
+    marginVertical: spacing.lg,
   },
 });
 

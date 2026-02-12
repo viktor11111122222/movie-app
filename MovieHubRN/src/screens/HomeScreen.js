@@ -1,23 +1,20 @@
-import React, {useState, useEffect} from 'react';
-import {
-  View,
-  ScrollView,
-  StyleSheet,
-  RefreshControl,
-  ActivityIndicator,
-} from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, ScrollView, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import { colors, spacing } from '../utils/theme';
+import tmdbService from '../services/tmdb';
 import HeroSection from '../components/HeroSection';
 import MovieRow from '../components/MovieRow';
-import {tmdbService} from '../services/tmdb';
+import RecentlyViewed, { addToRecentlyViewed } from '../components/RecentlyViewed';
 
-const HomeScreen = ({navigation}) => {
-  const [isLoading, setIsLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+const HomeScreen = ({ navigation }) => {
   const [trending, setTrending] = useState([]);
   const [popular, setPopular] = useState([]);
   const [topRated, setTopRated] = useState([]);
+  const [nowPlaying, setNowPlaying] = useState([]);
   const [upcoming, setUpcoming] = useState([]);
   const [heroMovie, setHeroMovie] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadMovies();
@@ -25,40 +22,60 @@ const HomeScreen = ({navigation}) => {
 
   const loadMovies = async () => {
     try {
-      const [trendingData, popularData, topRatedData, upcomingData] =
-        await Promise.all([
-          tmdbService.getTrending(),
-          tmdbService.getPopular(),
-          tmdbService.getTopRated(),
-          tmdbService.getUpcoming(),
-        ]);
+      const [
+        trendingData,
+        popularData,
+        topRatedData,
+        nowPlayingData,
+        upcomingData,
+      ] = await Promise.all([
+        tmdbService.getTrending(),
+        tmdbService.getPopular(),
+        tmdbService.getTopRated(),
+        tmdbService.getNowPlaying(),
+        tmdbService.getUpcoming(),
+      ]);
 
       setTrending(trendingData.results);
       setPopular(popularData.results);
       setTopRated(topRatedData.results);
+      setNowPlaying(nowPlayingData.results);
       setUpcoming(upcomingData.results);
       setHeroMovie(trendingData.results[0]);
     } catch (error) {
       console.error('Error loading movies:', error);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
       setRefreshing(false);
     }
   };
 
-  const handleRefresh = () => {
+  const onRefresh = () => {
     setRefreshing(true);
     loadMovies();
   };
 
-  const handleMoviePress = movie => {
-    navigation.navigate('MovieDetails', {movieId: movie.id});
+  const handleMoviePress = (movie) => {
+    addToRecentlyViewed(movie);
+    navigation.navigate('MovieDetails', { movieId: movie.id });
   };
 
-  if (isLoading) {
+  const handlePlayTrailer = async (movie) => {
+    try {
+      const videos = await tmdbService.getMovieVideos(movie.id);
+      const trailer = videos.results.find(v => v.type === 'Trailer');
+      if (trailer) {
+        navigation.navigate('VideoPlayer', { videoKey: trailer.key });
+      }
+    } catch (error) {
+      console.error('Error loading trailer:', error);
+    }
+  };
+
+  if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#E50914" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -69,37 +86,25 @@ const HomeScreen = ({navigation}) => {
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
-          onRefresh={handleRefresh}
-          tintColor="#E50914"
+          onRefresh={onRefresh}
+          tintColor={colors.primary}
         />
-      }>
-      <HeroSection movie={heroMovie} onPress={handleMoviePress} />
-
-      <MovieRow
-        title="Trending Now"
-        movies={trending}
-        onMoviePress={handleMoviePress}
+      }
+    >
+      <HeroSection
+        movie={heroMovie}
+        onPress={handleMoviePress}
+        onPlayTrailer={handlePlayTrailer}
       />
 
-      <MovieRow
-        title="Popular"
-        movies={popular}
-        onMoviePress={handleMoviePress}
-      />
-
-      <MovieRow
-        title="Top Rated"
-        movies={topRated}
-        onMoviePress={handleMoviePress}
-      />
-
-      <MovieRow
-        title="Coming Soon"
-        movies={upcoming}
-        onMoviePress={handleMoviePress}
-      />
-
-      <View style={styles.bottomPadding} />
+      <View style={styles.content}>
+        <RecentlyViewed onMoviePress={handleMoviePress} />
+        <MovieRow title="Trending Now" movies={trending} onMoviePress={handleMoviePress} />
+        <MovieRow title="Popular" movies={popular} onMoviePress={handleMoviePress} />
+        <MovieRow title="Now Playing" movies={nowPlaying} onMoviePress={handleMoviePress} />
+        <MovieRow title="Top Rated" movies={topRated} onMoviePress={handleMoviePress} />
+        <MovieRow title="Coming Soon" movies={upcoming} onMoviePress={handleMoviePress} />
+      </View>
     </ScrollView>
   );
 };
@@ -107,16 +112,16 @@ const HomeScreen = ({navigation}) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: colors.background,
+  },
+  content: {
+    paddingBottom: spacing.xxxl,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0a0a0a',
-  },
-  bottomPadding: {
-    height: 20,
+    backgroundColor: colors.background,
   },
 });
 

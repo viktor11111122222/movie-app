@@ -5,32 +5,31 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  ImageBackground,
-  ScrollView,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
+import {LinearGradient} from 'react-native-linear-gradient';
 import {useAuth} from '../context/AuthContext';
+import {colors, fonts, spacing, borderRadius} from '../utils/theme';
 
 const LoginScreen = ({navigation}) => {
-  const {login} = useAuth();
-  const [loginValue, setLoginValue] = useState('');
+  const [loginInput, setLoginInput] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const {login} = useAuth();
 
   const handleLogin = async () => {
-    if (!loginValue || !password) {
-      Alert.alert('Error', 'Please fill all fields');
+    if (!loginInput.trim() || !password) {
+      Alert.alert('Error', 'Please enter username/email and password');
       return;
     }
 
     setIsLoading(true);
-    const result = await login(loginValue, password);
+    const result = await login(loginInput.trim(), password);
     setIsLoading(false);
 
     if (!result.success) {
@@ -39,92 +38,95 @@ const LoginScreen = ({navigation}) => {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ImageBackground
-        source={{
-          uri: 'https://image.tmdb.org/t/p/original/8Y43POKjjKDGI9MH89NW0NAzzp8.jpg',
-        }}
-        style={styles.background}
-        blurRadius={2}>
-        <LinearGradient
-          colors={[
-            'rgba(0, 0, 0, 0.92)',
-            'rgba(20, 20, 20, 0.88)',
-            'rgba(10, 10, 10, 0.92)',
-          ]}
-          style={styles.gradient}>
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled">
-            <View style={styles.logoContainer}>
-              <Icon name="film-outline" size={80} color="#5B8DBE" />
-              <Text style={styles.title}>MovieHub</Text>
-              <Text style={styles.subtitle}>Sign in to discover movies</Text>
+    <LinearGradient
+      colors={[colors.background, colors.primaryDark, colors.background]}
+      style={styles.container}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}>
+        <View style={styles.content}>
+          <View style={styles.logoContainer}>
+            <Icon name="film" size={80} color={colors.primary} />
+            <Text style={styles.logoText}>MovieHub</Text>
+            <Text style={styles.subtitle}>Discover your next favorite movie</Text>
+          </View>
+
+          <View style={styles.formContainer}>
+            <View style={styles.inputContainer}>
+              <Icon
+                name="person-outline"
+                size={20}
+                color={colors.textSecondary}
+                style={styles.inputIcon}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Username or Email"
+                placeholderTextColor={colors.textSecondary}
+                value={loginInput}
+                onChangeText={setLoginInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
             </View>
 
-            <View style={styles.formContainer}>
-              <View style={styles.inputContainer}>
-                <Icon name="person-outline" size={20} color="#fff" />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Username or Email"
-                  placeholderTextColor="rgba(255,255,255,0.5)"
-                  value={loginValue}
-                  onChangeText={setLoginValue}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Icon name="lock-closed-outline" size={20} color="#fff" />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Password"
-                  placeholderTextColor="rgba(255,255,255,0.5)"
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                />
-                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                  <Icon
-                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                    size={20}
-                    color="#fff"
-                  />
-                </TouchableOpacity>
-              </View>
-
+            <View style={styles.inputContainer}>
+              <Icon
+                name="lock-closed-outline"
+                size={20}
+                color={colors.textSecondary}
+                style={styles.inputIcon}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Password"
+                placeholderTextColor={colors.textSecondary}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+              />
               <TouchableOpacity
-                style={styles.loginButton}
-                onPress={handleLogin}
-                disabled={isLoading}>
-                {isLoading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.loginButtonText}>Sign In</Text>
-                )}
-              </TouchableOpacity>
-
-              <View style={styles.divider}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>OR</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              <TouchableOpacity
-                style={styles.registerButton}
-                onPress={() => navigation.navigate('Register')}>
-                <Text style={styles.registerButtonText}>Create Account</Text>
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.eyeIcon}>
+                <Icon
+                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={20}
+                  color={colors.textSecondary}
+                />
               </TouchableOpacity>
             </View>
-          </ScrollView>
-        </LinearGradient>
-      </ImageBackground>
-    </KeyboardAvoidingView>
+
+            <TouchableOpacity
+              style={styles.loginButton}
+              onPress={handleLogin}
+              disabled={isLoading}
+              activeOpacity={0.8}>
+              {isLoading ? (
+                <ActivityIndicator color={colors.textPrimary} />
+              ) : (
+                <Text style={styles.loginButtonText}>Sign In</Text>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>OR</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Register')}
+              activeOpacity={0.7}>
+              <Text style={styles.registerText}>
+                Don't have an account?{' '}
+                <Text style={styles.registerLink}>Sign Up</Text>
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </LinearGradient>
   );
 };
 
@@ -132,93 +134,89 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  background: {
+  keyboardView: {
     flex: 1,
   },
-  gradient: {
+  content: {
     flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
+    padding: spacing.xl,
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: spacing.xxl,
   },
-  title: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: 2,
-    marginTop: 12,
+  logoText: {
+    color: colors.textPrimary,
+    fontSize: fonts.sizes.xxxl,
+    fontWeight: '800',
+    marginTop: spacing.md,
   },
   subtitle: {
-    fontSize: 15,
-    color: 'rgba(255, 255, 255, 0.5)',
-    marginTop: 8,
+    color: colors.textSecondary,
+    fontSize: fonts.sizes.md,
+    marginTop: spacing.xs,
   },
   formContainer: {
     width: '100%',
-    maxWidth: 400,
-    alignSelf: 'center',
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 12,
-    paddingHorizontal: 15,
-    marginBottom: 15,
+    backgroundColor: colors.cardBackground,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: colors.border,
+  },
+  inputIcon: {
+    marginRight: spacing.sm,
   },
   input: {
     flex: 1,
-    color: '#fff',
-    fontSize: 16,
-    paddingVertical: 15,
-    marginLeft: 10,
+    color: colors.textPrimary,
+    fontSize: fonts.sizes.md,
+    paddingVertical: spacing.md,
+  },
+  eyeIcon: {
+    padding: spacing.xs,
   },
   loginButton: {
-    backgroundColor: '#E50914',
-    borderRadius: 12,
-    paddingVertical: 15,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: spacing.sm,
   },
   loginButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: colors.textPrimary,
+    fontSize: fonts.sizes.lg,
+    fontWeight: '700',
   },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 25,
+    marginVertical: spacing.lg,
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: colors.border,
   },
   dividerText: {
-    color: 'rgba(255, 255, 255, 0.5)',
-    marginHorizontal: 15,
-    fontSize: 14,
+    color: colors.textSecondary,
+    fontSize: fonts.sizes.sm,
+    marginHorizontal: spacing.md,
   },
-  registerButton: {
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 12,
-    paddingVertical: 15,
-    alignItems: 'center',
+  registerText: {
+    color: colors.textSecondary,
+    fontSize: fonts.sizes.md,
+    textAlign: 'center',
   },
-  registerButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+  registerLink: {
+    color: colors.primary,
+    fontWeight: '700',
   },
 });
 

@@ -15,8 +15,5 @@
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.6.2",
     "express": "^5.2.1"
-  },
-  "devDependencies": {
-    "@react-native-community/cli": "^20.1.1"
   }
 }

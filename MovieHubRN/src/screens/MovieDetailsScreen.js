@@ -1,30 +1,33 @@
-import React, {useState, useEffect} from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   ScrollView,
+  Image,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  Dimensions,
-  Alert,
 } from 'react-native';
-import FastImage from 'react-native-fast-image';
-import LinearGradient from 'react-native-linear-gradient';
+import {LinearGradient} from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
-import {tmdbService} from '../services/tmdb';
-import {useWishlist} from '../context/WishlistContext';
-import {movieService} from '../services/api';
+import { colors, spacing, fonts, borderRadius } from '../utils/theme';
+import tmdbService from '../services/tmdb';
+import { useWishlist } from '../context/WishlistContext';
+import { getImageUrl, formatDate, formatRuntime, formatCurrency } from '../utils/helpers';
+import StarRating from '../components/StarRating';
+import StreamingProviders from '../components/StreamingProviders';
 import MovieRow from '../components/MovieRow';
+import ShareButton from '../components/ShareButton';
+import { addToRecentlyViewed } from '../components/RecentlyViewed';
 
-const {width, height} = Dimensions.get('window');
-
-const MovieDetailsScreen = ({route, navigation}) => {
-  const {movieId} = route.params;
+const MovieDetailsScreen = ({ route, navigation }) => {
+  const { movieId } = route.params;
   const [movie, setMovie] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [similarMovies, setSimilarMovies] = useState([]);
-  const {isInWishlist, toggleWishlist} = useWishlist();
+  const [similar, setSimilar] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [userRating, setUserRating] = useState(0);
+
+  const { isInWishlist, addToWishlist, removeFromWishlist, markAsWatched, isWatched } = useWishlist();
 
   useEffect(() => {
     loadMovieDetails();
@@ -32,275 +35,431 @@ const MovieDetailsScreen = ({route, navigation}) => {
 
   const loadMovieDetails = async () => {
     try {
+      setLoading(true);
       const [movieData, similarData] = await Promise.all([
         tmdbService.getMovieDetails(movieId),
         tmdbService.getSimilarMovies(movieId),
       ]);
 
       setMovie(movieData);
-      setSimilarMovies(similarData.results.slice(0, 10));
-      
-      // Track view
-      movieService.trackView(movieId);
+      setSimilar(similarData.results);
+      addToRecentlyViewed(movieData);
     } catch (error) {
       console.error('Error loading movie details:', error);
-      Alert.alert('Error', 'Failed to load movie details');
-      navigation.goBack();
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   const handleWishlistToggle = async () => {
-    await toggleWishlist(movie);
+    if (isInWishlist(movieId)) {
+      await removeFromWishlist(movieId);
+    } else {
+      await addToWishlist(movie);
+    }
   };
 
-  const handleMoviePress = selectedMovie => {
-    navigation.push('MovieDetails', {movieId: selectedMovie.id});
+  const handleMarkWatched = async () => {
+    if (userRating > 0) {
+      await markAsWatched(movieId, userRating);
+    }
   };
 
-  if (isLoading) {
+  const handlePlayTrailer = async () => {
+    try {
+      if (movie.videos?.results?.length > 0) {
+        const trailer = movie.videos.results.find(v => v.type === 'Trailer');
+        if (trailer) {
+          navigation.navigate('VideoPlayer', { videoKey: trailer.key });
+        }
+      }
+    } catch (error) {
+      console.error('Error playing trailer:', error);
+    }
+  };
+
+  const handleSimilarMoviePress = (similarMovie) => {
+    navigation.push('MovieDetails', { movieId: similarMovie.id });
+  };
+
+  if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#E50914" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
-  if (!movie) return null;
+  if (!movie) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>Movie not found</Text>
+      </View>
+    );
+  }
 
-  const inWishlist = isInWishlist(movie.id);
+  const inWishlist = isInWishlist(movieId);
+  const watched = isWatched(movieId);
 
   return (
-    <View style={styles.container}>
-      <ScrollView>
-        {/* Hero Image */}
-        <View style={styles.heroContainer}>
-          <FastImage
-            source={{uri: tmdbService.getBackdropUrl(movie.backdrop_path)}}
-            style={styles.backdrop}
-            resizeMode={FastImage.resizeMode.cover}
-          />
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.5)', '#0a0a0a']}
-            style={styles.gradient}
+    <ScrollView style={styles.container}>
+      <View style={styles.header}>
+        <Image
+          source={{ uri: getImageUrl(movie.backdrop_path || movie.poster_path, 'original') }}
+          style={styles.backdrop}
+          resizeMode="cover"
+        />
+        <LinearGradient
+          colors={['transparent', colors.background]}
+          style={styles.gradient}
+        />
+
+        <View style={styles.headerButtons}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Icon name="arrow-back" size={24} color={colors.white} />
+          </TouchableOpacity>
+          <ShareButton movie={movie} />
+        </View>
+      </View>
+
+      <View style={styles.content}>
+        <View style={styles.posterRow}>
+          <Image
+            source={{ uri: getImageUrl(movie.poster_path) }}
+            style={styles.poster}
+            resizeMode="cover"
           />
 
+          <View style={styles.titleContainer}>
+            <Text style={styles.title}>{movie.title}</Text>
+            <Text style={styles.tagline}>{movie.tagline}</Text>
+
+            <View style={styles.metadata}>
+              <View style={styles.ratingContainer}>
+                <Icon name="star" size={16} color={colors.accent} />
+                <Text style={styles.rating}>{movie.vote_average?.toFixed(1)}</Text>
+              </View>
+              <Text style={styles.metadataText}>{formatDate(movie.release_date)}</Text>
+              <Text style={styles.metadataText}>{formatRuntime(movie.runtime)}</Text>
+            </View>
+
+            <View style={styles.genres}>
+              {movie.genres?.map((genre) => (
+                <View key={genre.id} style={styles.genreTag}>
+                  <Text style={styles.genreText}>{genre.name}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.actions}>
           <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}>
-            <Icon name="arrow-back" size={24} color="#fff" />
+            style={[styles.actionButton, styles.primaryButton]}
+            onPress={handlePlayTrailer}
+          >
+            <Icon name="play" size={20} color={colors.white} />
+            <Text style={styles.actionButtonText}>Trailer</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.wishlistButton}
-            onPress={handleWishlistToggle}>
+            style={[styles.actionButton, inWishlist && styles.activeButton]}
+            onPress={handleWishlistToggle}
+          >
             <Icon
               name={inWishlist ? 'bookmark' : 'bookmark-outline'}
-              size={28}
-              color={inWishlist ? '#E50914' : '#fff'}
+              size={20}
+              color={colors.white}
             />
+            <Text style={styles.actionButtonText}>
+              {inWishlist ? 'In Wishlist' : 'Wishlist'}
+            </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Movie Info */}
-        <View style={styles.content}>
-          <Text style={styles.title}>{movie.title}</Text>
-
-          <View style={styles.meta}>
-            <View style={styles.rating}>
-              <Icon name="star" size={20} color="#FFD700" />
-              <Text style={styles.ratingText}>{movie.vote_average?.toFixed(1)}</Text>
-            </View>
-            <Text style={styles.year}>
-              {movie.release_date?.substring(0, 4)}
-            </Text>
-            <Text style={styles.runtime}>{movie.runtime} min</Text>
+        {!watched && (
+          <View style={styles.ratingSection}>
+            <Text style={styles.sectionTitle}>Rate this movie</Text>
+            <StarRating
+              rating={userRating}
+              onRate={setUserRating}
+              editable
+              size={32}
+            />
+            {userRating > 0 && (
+              <TouchableOpacity style={styles.watchedButton} onPress={handleMarkWatched}>
+                <Text style={styles.watchedButtonText}>Mark as Watched</Text>
+              </TouchableOpacity>
+            )}
           </View>
+        )}
 
-          <View style={styles.genres}>
-            {movie.genres?.slice(0, 3).map(genre => (
-              <View key={genre.id} style={styles.genreTag}>
-                <Text style={styles.genreText}>{genre.name}</Text>
-              </View>
-            ))}
-          </View>
-
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Overview</Text>
           <Text style={styles.overview}>{movie.overview}</Text>
-
-          {movie.credits?.cast && movie.credits.cast.length > 0 && (
-            <>
-              <Text style={styles.sectionTitle}>Cast</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.castScroll}>
-                {movie.credits.cast.slice(0, 10).map(person => (
-                  <View key={person.id} style={styles.castCard}>
-                    <FastImage
-                      source={{
-                        uri: person.profile_path
-                          ? tmdbService.getImageUrl(person.profile_path)
-                          : 'https://via.placeholder.com/200x300',
-                      }}
-                      style={styles.castImage}
-                      resizeMode={FastImage.resizeMode.cover}
-                    />
-                    <Text style={styles.castName} numberOfLines={1}>
-                      {person.name}
-                    </Text>
-                    <Text style={styles.castCharacter} numberOfLines={1}>
-                      {person.character}
-                    </Text>
-                  </View>
-                ))}
-              </ScrollView>
-            </>
-          )}
-
-          {similarMovies.length > 0 && (
-            <MovieRow
-              title="Similar Movies"
-              movies={similarMovies}
-              onMoviePress={handleMoviePress}
-            />
-          )}
         </View>
-      </ScrollView>
-    </View>
+
+        {movie.budget > 0 && (
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Budget:</Text>
+            <Text style={styles.infoValue}>{formatCurrency(movie.budget)}</Text>
+          </View>
+        )}
+
+        {movie.revenue > 0 && (
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Revenue:</Text>
+            <Text style={styles.infoValue}>{formatCurrency(movie.revenue)}</Text>
+          </View>
+        )}
+
+        {movie.credits?.cast && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Cast</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {movie.credits.cast.slice(0, 10).map((person) => (
+                <View key={person.id} style={styles.castItem}>
+                  <Image
+                    source={{
+                      uri: person.profile_path
+                        ? getImageUrl(person.profile_path, 'w185')
+                        : 'https://via.placeholder.com/185x278?text=No+Image',
+                    }}
+                    style={styles.castImage}
+                  />
+                  <Text style={styles.castName}>{person.name}</Text>
+                  <Text style={styles.castCharacter}>{person.character}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {movie['watch/providers'] && (
+          <StreamingProviders providers={movie['watch/providers'].results} />
+        )}
+
+        {similar.length > 0 && (
+          <MovieRow
+            title="Similar Movies"
+            movies={similar}
+            onMoviePress={handleSimilarMoviePress}
+          />
+        )}
+      </View>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: colors.background,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0a0a0a',
+    backgroundColor: colors.background,
   },
-  heroContainer: {
-    height: height * 0.5,
-    width: width,
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+  },
+  errorText: {
+    color: colors.text,
+    fontSize: fonts.sizes.lg,
+  },
+  header: {
+    height: 300,
+    position: 'relative',
   },
   backdrop: {
     width: '100%',
     height: '100%',
-    position: 'absolute',
   },
   gradient: {
     position: 'absolute',
-    width: '100%',
-    height: '100%',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '50%',
+  },
+  headerButtons: {
+    position: 'absolute',
+    top: 50,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
   },
   backButton: {
-    position: 'absolute',
-    top: 50,
-    left: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    borderRadius: 25,
-    padding: 10,
-  },
-  wishlistButton: {
-    position: 'absolute',
-    top: 50,
-    right: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    borderRadius: 25,
-    padding: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   content: {
-    padding: 16,
+    padding: spacing.lg,
+  },
+  posterRow: {
+    flexDirection: 'row',
+    marginBottom: spacing.lg,
+  },
+  poster: {
+    width: 120,
+    height: 180,
+    borderRadius: borderRadius.md,
+  },
+  titleContainer: {
+    flex: 1,
+    marginLeft: spacing.lg,
   },
   title: {
-    color: '#fff',
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: 12,
+    fontSize: fonts.sizes.xxl,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: spacing.xs,
   },
-  meta: {
+  tagline: {
+    fontSize: fonts.sizes.sm,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+    marginBottom: spacing.md,
+  },
+  metadata: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
   },
   rating: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 15,
-  },
-  ratingText: {
-    color: '#FFD700',
-    fontSize: 16,
-    fontWeight: '600',
+    color: colors.text,
+    fontSize: fonts.sizes.md,
+    fontWeight: 'bold',
     marginLeft: 4,
   },
-  year: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 16,
-    marginRight: 15,
-  },
-  runtime: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 16,
+  metadataText: {
+    color: colors.textSecondary,
+    fontSize: fonts.sizes.sm,
   },
   genres: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginBottom: 20,
+    gap: spacing.xs,
   },
   genreTag: {
-    backgroundColor: 'rgba(229, 9, 20, 0.2)',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginRight: 8,
-    marginBottom: 8,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.sm,
   },
   genreText: {
-    color: '#E50914',
-    fontSize: 12,
-    fontWeight: '600',
+    color: colors.textSecondary,
+    fontSize: fonts.sizes.xs,
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    gap: spacing.sm,
+  },
+  primaryButton: {
+    backgroundColor: colors.primary,
+  },
+  activeButton: {
+    backgroundColor: colors.secondary,
+  },
+  actionButtonText: {
+    color: colors.white,
+    fontSize: fonts.sizes.md,
+    fontWeight: 'bold',
+  },
+  ratingSection: {
+    backgroundColor: colors.surface,
+    padding: spacing.lg,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.lg,
+    alignItems: 'center',
+  },
+  section: {
+    marginBottom: spacing.lg,
   },
   sectionTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 12,
-    marginTop: 8,
+    fontSize: fonts.sizes.xl,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: spacing.md,
   },
   overview: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 15,
+    fontSize: fonts.sizes.md,
+    color: colors.textSecondary,
     lineHeight: 22,
-    marginBottom: 20,
   },
-  castScroll: {
-    marginBottom: 20,
+  watchedButton: {
+    backgroundColor: colors.success,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.md,
   },
-  castCard: {
+  watchedButtonText: {
+    color: colors.white,
+    fontSize: fonts.sizes.md,
+    fontWeight: 'bold',
+  },
+  infoRow: {
+    flexDirection: 'row',
+    marginBottom: spacing.sm,
+  },
+  infoLabel: {
+    fontSize: fonts.sizes.md,
+    color: colors.textSecondary,
+    fontWeight: 'bold',
+    marginRight: spacing.sm,
+  },
+  infoValue: {
+    fontSize: fonts.sizes.md,
+    color: colors.text,
+  },
+  castItem: {
     width: 100,
-    marginRight: 12,
+    marginRight: spacing.md,
   },
   castImage: {
     width: 100,
     height: 150,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    marginBottom: 8,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.xs,
+    backgroundColor: colors.surface,
   },
   castName: {
-    color: '#fff',
-    fontSize: 13,
+    fontSize: fonts.sizes.sm,
+    color: colors.text,
     fontWeight: '600',
     marginBottom: 2,
   },
   castCharacter: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 12,
+    fontSize: fonts.sizes.xs,
+    color: colors.textSecondary,
   },
 });
 

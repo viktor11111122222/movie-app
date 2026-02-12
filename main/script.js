@@ -1444,7 +1444,7 @@ function renderMovieCards(container, movies, isTrending = false) {
 }
 
 // Refresh carousel sa novim filmovima
-async function refreshCarousel(carouselType) {
+async function refreshCarousel(carouselType, event) {
   console.log('🔄 Refreshing carousel:', carouselType);
   
   const state = carouselState[carouselType];
@@ -1452,10 +1452,26 @@ async function refreshCarousel(carouselType) {
   
   let carousel, movies;
   
+  // Dinamički pronađi carousel na osnovu dugmeta koje je kliknuto
+  if (event && event.target) {
+    const button = event.target.closest('.refresh-btn');
+    if (button) {
+      const section = button.closest('.carousel-section');
+      if (section) {
+        carousel = section.querySelector('.carousel');
+      }
+    }
+  }
+  
+  // Fallback na stari način ako event nije prosleđen ili carousel nije pronađen
+  if (!carousel) {
+    console.warn('⚠️ Carousel not found dynamically, using fallback selector');
+  }
+  
   try {
     switch (carouselType) {
       case 'recommended':
-        carousel = document.querySelector('.carousel-section:nth-of-type(1) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(1) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         // Učitaj sledeću grupu stranica (ciklično)
@@ -1485,7 +1501,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'trending':
-        carousel = document.querySelector('.carousel-section:nth-of-type(2) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(2) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         // Ciklično menjanje stranica
@@ -1507,7 +1523,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'topRated':
-        carousel = document.querySelector('.carousel-section:nth-of-type(3) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(3) .carousel');
         
         if (currentGenreFilter) {
           // Refresh za specifični žanr
@@ -1564,7 +1580,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'newReleases':
-        carousel = document.querySelector('.carousel-section:nth-of-type(4) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(4) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         // Ciklično menjanje stranica
@@ -1586,7 +1602,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'popular':
-        carousel = document.querySelector('.carousel-section:nth-of-type(5) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(5) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         state.currentPage = (state.currentPage % state.maxPage) + 1;
@@ -1606,7 +1622,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'upcoming':
-        carousel = document.querySelector('.carousel-section:nth-of-type(6) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(6) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         state.currentPage = (state.currentPage % state.maxPage) + 1;
@@ -1626,7 +1642,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'highestRated':
-        carousel = document.querySelector('.carousel-section:nth-of-type(7) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(7) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         state.currentPage = (state.currentPage % state.maxPage) + 1;
@@ -1650,7 +1666,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'classics':
-        carousel = document.querySelector('.carousel-section:nth-of-type(8) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(8) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         state.currentPage = (state.currentPage % state.maxPage) + 1;
@@ -1674,7 +1690,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'action':
-        carousel = document.querySelector('.carousel-section:nth-of-type(9) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(9) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         state.currentPage = (state.currentPage % state.maxPage) + 1;
@@ -1686,7 +1702,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'comedy':
-        carousel = document.querySelector('.carousel-section:nth-of-type(10) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(10) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         state.currentPage = (state.currentPage % state.maxPage) + 1;
@@ -1698,7 +1714,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'horror':
-        carousel = document.querySelector('.carousel-section:nth-of-type(11) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(11) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         state.currentPage = (state.currentPage % state.maxPage) + 1;
@@ -1710,7 +1726,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'scifi':
-        carousel = document.querySelector('.carousel-section:nth-of-type(12) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(12) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         state.currentPage = (state.currentPage % state.maxPage) + 1;
@@ -1722,7 +1738,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'drama':
-        carousel = document.querySelector('.carousel-section:nth-of-type(13) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(13) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         state.currentPage = (state.currentPage % state.maxPage) + 1;
@@ -1734,7 +1750,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'documentary':
-        carousel = document.querySelector('.carousel-section:nth-of-type(14) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(14) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         state.currentPage = (state.currentPage % state.maxPage) + 1;
@@ -1746,7 +1762,7 @@ async function refreshCarousel(carouselType) {
         break;
         
       case 'animation':
-        carousel = document.querySelector('.carousel-section:nth-of-type(15) .carousel');
+        if (!carousel) carousel = document.querySelector('.carousel-section:nth-of-type(15) .carousel');
         carousel.innerHTML = '<p style="color: rgba(255,255,255,0.5); padding: 20px;">Loading...</p>';
         
         state.currentPage = (state.currentPage % state.maxPage) + 1;
